@@ -1,0 +1,202 @@
+name: tgo-suite
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tgo-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tgo}
+      POSTGRES_USER: ${POSTGRES_USER:-tgo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tgo}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: tgo-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  wukongim:
+    image: registry.cn-shanghai.aliyuncs.com/wukongim/wukongim:v2.2.3-dev
+    container_name: tgo-wukongim
+    env_file:
+      - .env
+    environment:
+      WK_CLUSTER_NODEID: 1001
+      WK_CLUSTER_SERVERADDR: wukongim:11110
+      WK_CLUSTER_APIURL: http://wukongim:5001
+      WK_INTRANET_TCPADDR: wukongim:5100
+      WK_MODE: release
+      WK_EXTERNAL_IP: ${SERVER_HOST:-127.0.0.1}
+      WK_WEBHOOK_HTTPADDR: http://tgo-api:8000/v1/integrations/wukongim/webhook
+    volumes:
+      - ./data/wukongim:/root/wukongim
+    ports:
+      - "5100:5100"
+      - "5200:5200"
+      - "5300:5300"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -Y off -O /dev/null http://localhost:5001/health > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  tgo-api:
+    build:
+      context: ./repos/tgo-api
+    image: tgo-api:local
+    container_name: tgo-api
+    env_file:
+      - .env
+    environment:
+      PORT: 8000
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tgo}:${POSTGRES_PASSWORD:-tgo}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-tgo}
+      API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost/api}
+      PLATFORM_SERVICE_URL: http://tgo-platform:8003
+      PLATFORM_SERVICE_TIMEOUT: 30
+      WUKONGIM_SERVICE_URL: http://wukongim:5001
+      WUKONGIM_SERVICE_TIMEOUT: 10
+      WUKONGIM_ENABLED: "true"
+      WUKONGIM_DEVICE_FLAG: 1
+      WUKONGIM_DEVICE_LEVEL: 1
+    volumes:
+      - ./data/tgo-api/uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      wukongim:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  tgo-platform:
+    build:
+      context: ./repos/tgo-platform
+    image: tgo-platform:local
+    container_name: tgo-platform
+    env_file:
+      - .env
+    environment:
+      PORT: 8003
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tgo}:${POSTGRES_PASSWORD:-tgo}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-tgo}
+      API_BASE_URL: http://tgo-api:8000
+      SSE_BACKPRESSURE_LIMIT: 1000
+      REQUEST_TIMEOUT_SECONDS: 120
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tgo-api:
+        condition: service_healthy
+      wukongim:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8003/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  tgo-web:
+    build:
+      context: ./repos/tgo-web
+      args:
+        VITE_WIDGET_PREVIEW_URL: ${VITE_WIDGET_PREVIEW_URL:-http://localhost:${WIDGET_PORT:-3001}}
+    image: tgo-web:local
+    container_name: tgo-web
+    env_file:
+      - .env
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:${API_PORT:-8000}}
+      VITE_DEBUG_MODE: ${VITE_DEBUG_MODE:-false}
+    depends_on:
+      - tgo-api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  tgo-widget-app:
+    build:
+      context: ./repos/tgo-widget-app
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:${API_PORT:-8000}}
+    image: tgo-widget-app:local
+    container_name: tgo-widget-app
+    env_file:
+      - .env
+    environment:
+      VITE_API_BASE: ${VITE_API_BASE:-http://localhost:${API_PORT:-8000}}
+    depends_on:
+      - tgo-api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: tgo-nginx
+    env_file:
+      - .env
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - ./data/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./data/nginx/ssl:/etc/nginx/ssl:ro
+      - ./data/certbot/www:/var/www/certbot:ro
+      - ./data/certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - tgo-web
+      - tgo-widget-app
+      - tgo-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: tgo-certbot
+    volumes:
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+      - ./data/certbot/logs:/var/log/letsencrypt
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
+    restart: unless-stopped
+    profiles:
+      - ssl-auto

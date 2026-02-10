@@ -1,0 +1,677 @@
+"""Chat service for handling chat completion business logic."""
+
+import json
+import asyncio
+import time
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Tuple, AsyncGenerator
+from uuid import UUID, uuid4
+
+from fastapi import HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.logging import get_logger
+from app.models import (
+    Platform,
+    Project,
+    Visitor,
+    VisitorServiceStatus,
+    VisitorWaitingQueue,
+    VisitorAssignmentRule,
+    QueueSource,
+    WaitingStatus,
+    Staff,
+)
+import app.services.visitor_service as visitor_service
+from app.tasks.process_waiting_queue import trigger_process_entry
+from app.services.wukongim_client import wukongim_client
+from app.services.fastgpt_client import fastgpt_client
+from app.utils.encoding import build_project_staff_channel_id
+from app.utils.const import (
+    CHANNEL_TYPE_PROJECT_STAFF,
+    CHANNEL_TYPE_CUSTOMER_SERVICE,
+    MessageType,
+)
+from app.schemas.chat import (
+    OpenAIChatMessage,
+    OpenAIChatCompletionResponse,
+    OpenAIChatCompletionChoice,
+    OpenAIChatCompletionUsage,
+)
+
+logger = get_logger("services.chat")
+
+FASTGPT_MODE = settings.AI_PROVIDER_MODE.lower() == "fastgpt"
+
+# ============================================================================
+# Validation & Helpers
+# ============================================================================
+
+def validate_platform_and_project(
+    platform_api_key: str,
+    db: Session
+) -> tuple[Platform, Project]:
+    """Validate Platform API key and return platform with project."""
+    platform = (
+        db.query(Platform)
+        .filter(
+            Platform.api_key == platform_api_key,
+            Platform.is_active.is_(True),
+            Platform.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not platform:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key"
+        )
+
+    project = platform.project
+    if not project or not project.api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Platform is not linked to a valid project"
+        )
+
+    return platform, project
+
+
+def is_ai_disabled(platform: Platform, visitor: Optional[Visitor]) -> bool:
+    """Check if AI should be disabled for the current conversation.
+
+    Priority:
+    1. Visitor override (`ai_disabled`): True → 禁用；False → 强制启用。
+    2. Platform baseline: 只有 ai_mode==="auto" 才默认启用，其余模式默认关闭。
+    """
+    visitor_override = getattr(visitor, "ai_disabled", None) if visitor is not None else None
+    if visitor_override is True:
+        return True
+    if visitor_override is False:
+        return False
+
+    ai_mode = getattr(platform, "ai_mode", None)
+    return ai_mode != "auto"
+
+
+def sse_format(event: Dict[str, Any]) -> str:
+    """Format event as SSE message."""
+    event_type = event.get("event_type") or "message"
+    data = json.dumps(event, ensure_ascii=False)
+    return f"event: {event_type}\ndata: {data}\n\n"
+
+
+def authenticate_staff_or_platform(
+    db: Session,
+    credentials: Optional[HTTPAuthorizationCredentials] = None,
+    platform_api_key: Optional[str] = None,
+) -> tuple[Optional[Staff], Optional[Platform]]:
+    """Authenticate via JWT (staff) or platform API key."""
+    current_user: Optional[Staff] = None
+    platform: Optional[Platform] = None
+
+    if credentials and credentials.credentials:
+        from app.core.security import verify_token
+        payload = verify_token(credentials.credentials)
+        if payload:
+            username = payload.get("sub")
+            if username:
+                current_user = (
+                    db.query(Staff)
+                    .filter(Staff.username == username, Staff.deleted_at.is_(None))
+                    .first()
+                )
+
+    if not current_user and platform_api_key:
+        platform = (
+            db.query(Platform)
+            .filter(
+                Platform.api_key == platform_api_key,
+                Platform.is_active.is_(True),
+                Platform.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+    return current_user, platform
+
+
+# ============================================================================
+# AI Integration Logic
+# ============================================================================
+
+async def forward_ai_event_to_wukongim(
+    event_type: str,
+    event_data: Dict[str, Any],
+    channel_id: str,
+    channel_type: int,
+    client_msg_no: str,
+    from_uid: str,
+) -> Optional[str]:
+    """Forward AI event to WuKongIM."""
+    try:
+        data = event_data.get("data") or {}
+        logger.info(f"Forwarding AI event1 {event_type} to WuKongIM: {data}")
+        if event_type in {"team_run_started"}:
+            await wukongim_client.send_event(
+                channel_id=channel_id,
+                channel_type=channel_type,
+                event_type="___TextMessageStart",
+                data='{"type":100}',
+                client_msg_no=client_msg_no,
+                from_uid=from_uid,
+                force=True,
+            )
+        elif event_type in {"team_run_content"}:
+            # Robust extraction of content from data
+            chunk_text = data.get("content") or data.get("text")
+            if not chunk_text and isinstance(data, dict):
+                inner_data = data.get("data", {})
+                if isinstance(inner_data, dict):
+                    chunk_text = inner_data.get("content") or inner_data.get("text")
+            
+            if chunk_text is not None:
+                await wukongim_client.send_event(
+                    channel_id=channel_id,
+                    channel_type=channel_type,
+                    event_type="___TextMessageContent",
+                    data=str(chunk_text),
+                    client_msg_no=client_msg_no,
+                    from_uid=from_uid,
+                )
+                return str(chunk_text)
+        elif event_type in {"team_run_completed"}:
+            await wukongim_client.send_event(
+                channel_id=channel_id,
+                channel_type=channel_type,
+                data="",
+                event_type="___TextMessageEnd",
+                client_msg_no=client_msg_no,
+                from_uid=from_uid,
+            )
+        elif event_type == "team_run_failed":
+            error_message = data.get("error") or "AI processing failed"
+            await wukongim_client.send_event(
+                channel_id=channel_id,
+                channel_type=channel_type,
+                event_type="___TextMessageEnd",
+                data=str(error_message),
+                client_msg_no=client_msg_no,
+                from_uid=from_uid,
+            )
+    except Exception as e:
+        logger.error(f"Failed to forward AI event {event_type} to WuKongIM: {e}")
+    return None
+
+
+async def _fastgpt_stream_response(
+    *,
+    message: str,
+    channel_id: str,
+    channel_type: int,
+    client_msg_no: str,
+    from_uid: str,
+    session_id: Optional[str],
+    team_id: Optional[str],
+    system_message: Optional[str],
+    expected_output: Optional[str],
+    user_id: str,
+    ai_config: Dict[str, Any],
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """Generate pseudo-stream events for FastGPT provider."""
+    if not FASTGPT_MODE:
+        return
+
+    run_id = uuid4().hex
+    team_label = team_id or "fastgpt-team"
+    team_name = "FastGPT Assistant"
+    start_event = {
+        "event_type": "team_run_started",
+        "data": {
+            "team_id": team_label,
+            "team_name": team_name,
+            "run_id": run_id,
+            "session_id": session_id,
+            "message_length": len(message),
+        },
+    }
+    await forward_ai_event_to_wukongim(
+        start_event["event_type"],
+        start_event,
+        channel_id,
+        channel_type,
+        client_msg_no,
+        from_uid,
+    )
+    yield start_event
+
+    start_time = time.perf_counter()
+    conversation_id = session_id or channel_id or uuid4().hex
+    user_identifier = user_id or from_uid
+
+    text = await fastgpt_client.generate_response(
+        message,
+        system_message=system_message,
+        expected_output=expected_output,
+        config_override=ai_config,
+        chat_id=conversation_id,
+        custom_uid=user_identifier,
+    )
+    content_event = {
+        "event_type": "team_run_content",
+        "data": {
+            "team_id": team_label,
+            "team_name": team_name,
+            "run_id": run_id,
+            "content": text,
+            "content_type": "str",
+            "reasoning_content": None,
+            "is_intermediate": False,
+        },
+    }
+    await forward_ai_event_to_wukongim(
+        content_event["event_type"],
+        content_event,
+        channel_id,
+        channel_type,
+        client_msg_no,
+        from_uid,
+    )
+    yield content_event
+
+    total_time = max(0.0, time.perf_counter() - start_time)
+    completed_event = {
+        "event_type": "team_run_completed",
+        "data": {
+            "team_id": team_label,
+            "team_name": team_name,
+            "run_id": run_id,
+            "total_time": total_time,
+            "content_length": len(text),
+            "content": text,
+        },
+    }
+    await forward_ai_event_to_wukongim(
+        completed_event["event_type"],
+        completed_event,
+        channel_id,
+        channel_type,
+        client_msg_no,
+        from_uid,
+    )
+    yield completed_event
+
+
+async def process_ai_stream_to_wukongim(
+    project_id: str,
+    user_id: str,
+    message: str,
+    channel_id: str,
+    channel_type: int,
+    client_msg_no: str,
+    from_uid: str,
+    session_id: Optional[str] = None,
+    team_id: Optional[str] = None,
+    system_message: Optional[str] = None,
+    expected_output: Optional[str] = None,
+    agent_ids: Optional[List[str]] = None,
+    agent_id: Optional[str] = None,
+    ai_config: Optional[Dict[str, Any]] = None,
+):
+    """Process AI stream and forward events to WuKongIM, while yielding events for SSE."""
+    full_content = ""
+    
+    # 1) Notify acceptance immediately (caller may already have done this, but here for consistency)
+    # yield {"event_type": "accepted", "visitor_id": visitor_id, "client_msg_no": client_msg_no}
+
+    # 2) Run AI completion
+    if not FASTGPT_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Only FastGPT integration is supported in the current build.",
+        )
+    try:
+        async for event in _fastgpt_stream_response(
+            message=message,
+            channel_id=channel_id,
+            channel_type=channel_type,
+            client_msg_no=client_msg_no,
+            from_uid=from_uid,
+            session_id=session_id,
+            team_id=team_id,
+            system_message=system_message,
+            expected_output=expected_output,
+            user_id=user_id,
+            ai_config=ai_config or {},
+        ):
+            event_type = event.get("event_type")
+            data = event.get("data", {})
+            if event_type == "team_run_content":
+                chunk = data.get("content")
+                if chunk:
+                    full_content += str(chunk)
+            yield {"event_type": event_type, "data": data}
+
+    except Exception as e:
+        logger.error(f"Error in AI stream processing: {e}")
+        error_data = {"error_message": str(e)}
+        await forward_ai_event_to_wukongim(
+            event_type="workflow_failed",
+            event_data=error_data,
+            channel_id=channel_id,
+            channel_type=channel_type,
+            client_msg_no=client_msg_no,
+            from_uid=from_uid,
+        )
+        yield {"event_type": "workflow_failed", "data": error_data}
+    
+
+
+async def handle_ai_response_non_stream(
+    project_id: str,
+    visitor_id: str,
+    message: str,
+    channel_id: str,
+    channel_type: int,
+    client_msg_no: str,
+    from_uid: str,
+    session_id: Optional[str] = None,
+    team_id: Optional[str] = None,
+    system_message: Optional[str] = None,
+    expected_output: Optional[str] = None,
+    agent_ids: Optional[List[str]] = None,
+    agent_id: Optional[str] = None,
+    ai_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Handle AI completion in a non-streaming way, while still forwarding to WuKongIM."""
+    full_content = ""
+    last_data = {}
+    
+    if not FASTGPT_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Only FastGPT integration is supported in the current build.",
+        )
+    try:
+        async for event in _fastgpt_stream_response(
+            message=message,
+            channel_id=channel_id,
+            channel_type=channel_type,
+            client_msg_no=client_msg_no,
+            from_uid=from_uid,
+            session_id=session_id,
+            team_id=team_id,
+            system_message=system_message,
+            expected_output=expected_output,
+            user_id=visitor_id,
+            ai_config=ai_config or {},
+        ):
+            event_type = event.get("event_type")
+            data = event.get("data", {})
+            if event_type == "team_run_content":
+                chunk = data.get("content")
+                if chunk:
+                    full_content += str(chunk)
+            last_data = data
+
+        return {"success": True, "content": full_content, "data": last_data}
+    except Exception as e:
+        logger.error(f"Error in non-stream AI processing: {e}")
+        error_data = {"error_message": str(e)}
+        await forward_ai_event_to_wukongim(
+            event_type="workflow_failed",
+            event_data=error_data,
+            channel_id=channel_id,
+            channel_type=channel_type,
+            client_msg_no=client_msg_no,
+            from_uid=from_uid,
+        )
+        return {"success": False, "error": str(e)}
+
+
+async def run_background_ai_interaction(
+    project_id: str,
+    user_id: str,
+    message: str,
+    channel_id: str,
+    channel_type: int,
+    client_msg_no: str,
+    from_uid: str,
+    session_id: Optional[str] = None,
+    team_id: Optional[str] = None,
+    system_message: Optional[str] = None,
+    expected_output: Optional[str] = None,
+    agent_ids: Optional[List[str]] = None,
+    agent_id: Optional[str] = None,
+    started_event: Optional[asyncio.Event] = None,
+    ai_config: Optional[Dict[str, Any]] = None,
+):
+    """Run AI interaction in the background.
+    
+    Args:
+        started_event: Optional asyncio.Event that will be set when team_run_started is received.
+    """
+    async for event_payload in process_ai_stream_to_wukongim(
+        project_id=project_id,
+        user_id=user_id,
+        message=message,
+        channel_id=channel_id,
+        channel_type=channel_type,
+        client_msg_no=client_msg_no,
+        from_uid=from_uid,
+        session_id=session_id,
+        team_id=team_id,
+        system_message=system_message,
+        expected_output=expected_output,
+        agent_ids=agent_ids,
+        agent_id=agent_id,
+        ai_config=ai_config or {},
+    ):
+        # Signal that AI processing has started
+        if started_event and not started_event.is_set():
+            event_type = event_payload.get("event_type")
+            if event_type == "team_run_started":
+                started_event.set()
+
+
+# ============================================================================
+# OpenAI Mapping Helpers
+# ============================================================================
+
+def extract_messages_from_openai_format(
+    messages: list[OpenAIChatMessage],
+    user_field: Optional[str] = None
+) -> tuple[str, Optional[str], str]:
+    """Extract user message, system message, and platform_open_id from OpenAI message format."""
+    user_message = None
+    system_message = None
+
+    for msg in reversed(messages):
+        if msg.role == "user" and user_message is None:
+            user_message = msg.content
+        elif msg.role == "system" and system_message is None:
+            system_message = msg.content
+
+    if not user_message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No user message found in messages array"
+        )
+
+    platform_open_id = user_field or f"openai_user_{uuid4().hex[:8]}"
+
+    return user_message, system_message, platform_open_id
+
+
+def estimate_token_usage(
+    messages: list[OpenAIChatMessage],
+    completion_text: str
+) -> tuple[int, int, int]:
+    """Estimate token usage for prompt and completion."""
+    prompt_text = " ".join([msg.content for msg in messages])
+    prompt_tokens = len(prompt_text.split())
+    completion_tokens = len(completion_text.split())
+    total_tokens = prompt_tokens + completion_tokens
+
+    return prompt_tokens, completion_tokens, total_tokens
+
+
+def build_openai_completion_response(
+    completion_id: str,
+    created_timestamp: int,
+    model: str,
+    completion_text: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int
+) -> OpenAIChatCompletionResponse:
+    """Build OpenAI-compatible completion response."""
+    return OpenAIChatCompletionResponse(
+        id=completion_id,
+        object="chat.completion",
+        created=created_timestamp,
+        model=model,
+        choices=[
+            OpenAIChatCompletionChoice(
+                index=0,
+                message=OpenAIChatMessage(
+                    role="assistant",
+                    content=completion_text,
+                ),
+                finish_reason="stop",
+            )
+        ],
+        usage=OpenAIChatCompletionUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        ),
+    )
+
+
+# ============================================================================
+# Messaging Helpers
+# ============================================================================
+
+async def send_user_message_to_wukongim(
+    *,
+    from_uid: str,
+    channel_id: str,
+    channel_type: int,
+    content: str,
+    msg_type: Optional[MessageType] = MessageType.TEXT,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Send a copy of the user's message to WuKongIM (best-effort)."""
+    if not content:
+        return
+    try:
+        # Build payload based on msg_type
+        # 1=TEXT, 2=IMAGE, 3=FILE
+        payload: Dict[str, Any] = {
+            "type": int(msg_type or MessageType.TEXT),
+            "content": content,
+        }
+        if msg_type == MessageType.IMAGE:
+            payload["url"] = content
+        elif msg_type == MessageType.FILE:
+            payload["url"] = content
+            # For files, name is often required by frontend
+            if extra and extra.get("file_name"):
+                payload["name"] = extra["file_name"]
+            else:
+                payload["name"] = content.split("/")[-1]
+        if extra:
+            payload["extra"] = extra
+
+        await wukongim_client.send_message(
+            payload=payload,
+            from_uid=from_uid,
+            channel_id=channel_id,
+            channel_type=channel_type,
+            client_msg_no=f"user_{uuid4().hex}",
+        )
+    except Exception:
+        # Do not fail main flow on WuKongIM send failure
+        return
+
+
+# ============================================================================
+# Visitor & Queue Management
+# ============================================================================
+
+async def get_or_create_visitor(
+    db: Session,
+    platform: Platform,
+    platform_open_id: str,
+    nickname: Optional[str] = None,
+    avatar_url: Optional[str] = None,
+) -> tuple[Visitor, bool]:
+    """
+    获取或创建访客。
+    
+    如果访客存在且信息发生变化，自动更新并通知 WuKongIM。
+    
+    Args:
+        db: 数据库会话
+        platform: 平台对象
+        platform_open_id: 平台用户ID
+        nickname: 昵称（可选）
+        avatar_url: 头像URL（可选）
+        
+    Returns:
+        tuple[Visitor, bool]: (访客对象, 是否发生了更新)
+    """
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.platform_id == platform.id,
+            Visitor.platform_open_id == platform_open_id,
+            Visitor.deleted_at.is_(None),
+        )
+        .first()
+    )
+    
+    if not visitor:
+        # 创建新访客
+        visitor = await visitor_service.create_visitor_with_channel(
+            db=db,
+            platform=platform,
+            platform_open_id=platform_open_id,
+            name=nickname, # 同时设置 name
+            nickname=nickname,
+            avatar_url=avatar_url,
+        )
+        return visitor, True
+    else:
+        # 更新访客信息（如果提供且发生变化）
+        changed = False
+        if nickname:
+            if visitor.nickname != nickname:
+                visitor.nickname = nickname
+                changed = True
+            if visitor.name != nickname:
+                visitor.name = nickname
+                changed = True
+            # 同步更新 nickname_zh 以确保两个字段一致
+            if visitor.nickname_zh != nickname:
+                visitor.nickname_zh = nickname
+                changed = True
+        
+        if avatar_url and visitor.avatar_url != avatar_url:
+            visitor.avatar_url = avatar_url
+            changed = True
+            
+        # 重置已关闭的访客状态
+        if visitor.service_status == VisitorServiceStatus.CLOSED.value:
+            visitor.service_status = VisitorServiceStatus.NEW.value
+            changed = True
+            logger.debug(f"Reset visitor {visitor.id} status from CLOSED to NEW")
+
+        if changed:
+            visitor.updated_at = datetime.utcnow()
+            db.commit()
+    
+    return visitor, changed
