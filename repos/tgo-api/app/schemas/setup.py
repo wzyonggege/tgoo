@@ -41,6 +41,12 @@ class SetupStatusResponse(BaseSchema):
 class CreateAdminRequest(BaseSchema):
     """Request schema for creating the first admin account."""
 
+    username: str = Field(
+        default="admin",
+        min_length=3,
+        max_length=50,
+        description="Admin username (unique, defaults to 'admin')",
+    )
     password: str = Field(
         ...,
         min_length=8,
