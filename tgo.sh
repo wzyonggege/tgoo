@@ -1915,6 +1915,7 @@ cmd_config() {
       rm -f "$domain_config_file.bak"
       echo "[INFO] Nginx IP allowlist set to: $allowlist"
       regenerate_nginx_config
+      reload_nginx_if_running
       ;;
     ip_allow_clear)
       ensure_domain_config
@@ -1922,6 +1923,7 @@ cmd_config() {
       rm -f "$domain_config_file.bak"
       echo "[INFO] Nginx IP allowlist cleared"
       regenerate_nginx_config
+      reload_nginx_if_running
       ;;
     http_port)
       if [ $# -eq 0 ]; then
@@ -2162,6 +2164,23 @@ regenerate_nginx_config() {
   bash ./scripts/generate-nginx-config.sh || {
     echo "[WARN] Failed to regenerate Nginx configuration"
   }
+}
+
+# Helper function to reload nginx when domain config changes are made.
+reload_nginx_if_running() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return
+  fi
+
+  if docker compose --env-file "$ENV_FILE" ps --quiet nginx 2>/dev/null | grep -q .; then
+    echo "[INFO] Restarting Nginx to apply configuration changes..."
+    docker compose --env-file "$ENV_FILE" restart nginx >/dev/null 2>&1 || {
+      echo "[WARN] Failed to restart Nginx automatically."
+      echo "[INFO] Please run: ./tgo.sh config apply"
+    }
+  else
+    echo "[INFO] Nginx is not running. Changes will apply on next start."
+  fi
 }
 
 # Doctor command - check health status of all services
