@@ -406,7 +406,7 @@ class Settings(BaseSettings):
     # Storage Settings
     STORAGE_TYPE: str = Field(
         default="local",
-        description="Storage type: local, oss, minio",
+        description="Storage type: local, oss, minio, s3",
     )
     
     # Aliyun OSS Settings
@@ -455,6 +455,36 @@ class Settings(BaseSettings):
     MINIO_DOWNLOAD_URL: Optional[str] = Field(
         default=None,
         description="MinIO download URL (if different from MINIO_URL, e.g., for public domain)",
+    )
+
+    # AWS S3 Settings
+    AWS_S3_BUCKET_NAME: Optional[str] = Field(
+        default=None,
+        description="AWS S3 bucket name",
+    )
+    AWS_S3_REGION: str = Field(
+        default="us-east-1",
+        description="AWS S3 region",
+    )
+    AWS_S3_ACCESS_KEY_ID: Optional[str] = Field(
+        default=None,
+        description="AWS access key ID (optional when using IAM role)",
+    )
+    AWS_S3_SECRET_ACCESS_KEY: Optional[str] = Field(
+        default=None,
+        description="AWS secret access key (optional when using IAM role)",
+    )
+    AWS_S3_SESSION_TOKEN: Optional[str] = Field(
+        default=None,
+        description="AWS session token for temporary credentials",
+    )
+    AWS_S3_ENDPOINT_URL: Optional[str] = Field(
+        default=None,
+        description="Optional custom S3 endpoint URL",
+    )
+    AWS_S3_PUBLIC_BASE_URL: Optional[str] = Field(
+        default=None,
+        description="Optional public base URL (e.g., CloudFront domain) for file access",
     )
     PLUGIN_ENABLED: bool = Field(
         default=True,

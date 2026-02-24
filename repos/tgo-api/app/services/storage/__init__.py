@@ -1,7 +1,7 @@
 """Storage services module.
 
 Provides a unified interface for file storage.
-Currently only supports local storage, OSS can be added later.
+Supports local, Aliyun OSS, MinIO and AWS S3.
 """
 
 from app.core.config import settings
@@ -33,6 +33,17 @@ def get_storage_backend() -> StorageBackend:
             bucket_name=settings.MINIO_BUCKET_NAME,
             upload_url=settings.MINIO_UPLOAD_URL,
             download_url=settings.MINIO_DOWNLOAD_URL,
+        )
+    elif storage_type == "s3":
+        from app.services.storage.aws_s3 import AWSS3Backend
+        return AWSS3Backend(
+            bucket_name=settings.AWS_S3_BUCKET_NAME,
+            region_name=settings.AWS_S3_REGION,
+            access_key_id=settings.AWS_S3_ACCESS_KEY_ID,
+            secret_access_key=settings.AWS_S3_SECRET_ACCESS_KEY,
+            session_token=settings.AWS_S3_SESSION_TOKEN,
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            public_base_url=settings.AWS_S3_PUBLIC_BASE_URL,
         )
     
     # Default to local storage
