@@ -458,6 +458,8 @@ Config Subcommands:
   widget_domain <domain>              Set widget service domain (e.g., widget.example.com)
   api_domain <domain>                 Set API service domain (e.g., api.example.com)
   ws_domain <domain>                  Set WebSocket service domain (e.g., ws.example.com)
+  ip_allow <ip[,ip/cidr,...]>         Set Nginx IP allowlist (comma/space separated)
+  ip_allow_clear                      Clear Nginx IP allowlist
   http_port <port>                    Set Nginx HTTP port (default: 80)
   https_port <port>                   Set Nginx HTTPS port (default: 443)
   ssl_mode <auto|manual|none>         Set SSL mode (auto=Let's Encrypt, manual=custom, none=no SSL)
@@ -1901,6 +1903,26 @@ cmd_config() {
       update_domain_env_vars
       regenerate_nginx_config
       ;;
+    ip_allow)
+      if [ $# -eq 0 ]; then
+        echo "[ERROR] IP allowlist value required"
+        echo "[INFO] Usage: ./tgo.sh config ip_allow <ip[,ip/cidr,...]>"
+        exit 1
+      fi
+      local allowlist="$*"
+      ensure_domain_config
+      sed -i.bak "s|^IP_ALLOWLIST=.*|IP_ALLOWLIST=$allowlist|" "$domain_config_file"
+      rm -f "$domain_config_file.bak"
+      echo "[INFO] Nginx IP allowlist set to: $allowlist"
+      regenerate_nginx_config
+      ;;
+    ip_allow_clear)
+      ensure_domain_config
+      sed -i.bak "s|^IP_ALLOWLIST=.*|IP_ALLOWLIST=|" "$domain_config_file"
+      rm -f "$domain_config_file.bak"
+      echo "[INFO] Nginx IP allowlist cleared"
+      regenerate_nginx_config
+      ;;
     http_port)
       if [ $# -eq 0 ]; then
         echo "[ERROR] Port value required"
@@ -2071,6 +2093,8 @@ cmd_config() {
       echo "  widget_domain <domain>        Set widget service domain"
       echo "  api_domain <domain>           Set API service domain"
       echo "  ws_domain <domain>            Set WebSocket service domain (WuKongIM)"
+      echo "  ip_allow <ips>                Set Nginx IP allowlist (comma/space separated)"
+      echo "  ip_allow_clear                Clear Nginx IP allowlist"
       echo "  http_port <port>              Set Nginx HTTP port"
       echo "  https_port <port>             Set Nginx HTTPS port"
       echo "  ssl_mode <auto|manual|none>   Set SSL mode"
@@ -2096,6 +2120,7 @@ WEB_DOMAIN=
 WIDGET_DOMAIN=
 API_DOMAIN=
 WS_DOMAIN=
+IP_ALLOWLIST=
 SSL_MODE=none
 SSL_EMAIL=
 ENABLE_SSL_AUTO_RENEW=true
@@ -2105,6 +2130,9 @@ EOF
     # Ensure WS_DOMAIN exists in config file (for upgrades)
     if ! grep -q "^WS_DOMAIN=" "$domain_config_file" 2>/dev/null; then
       echo "WS_DOMAIN=" >> "$domain_config_file"
+    fi
+    if ! grep -q "^IP_ALLOWLIST=" "$domain_config_file" 2>/dev/null; then
+      echo "IP_ALLOWLIST=" >> "$domain_config_file"
     fi
   fi
 }

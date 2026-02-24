@@ -57,6 +57,38 @@ WEB_DOMAIN=${WEB_DOMAIN:-localhost}
 WIDGET_DOMAIN=${WIDGET_DOMAIN:-localhost}
 API_DOMAIN=${API_DOMAIN:-localhost}
 WS_DOMAIN=${WS_DOMAIN:-localhost}
+IP_ALLOWLIST=${IP_ALLOWLIST:-}
+
+# Build a single-line allowlist snippet for Nginx location blocks.
+# Example output: "allow 10.0.0.1; allow 192.168.0.0/16; deny all;"
+build_ip_allow_rules() {
+    local raw_list="${1:-}"
+    if [ -z "$raw_list" ]; then
+        echo ""
+        return 0
+    fi
+
+    # Support comma/space/semicolon/newline separators and full-width commas.
+    local normalized
+    normalized=$(echo "$raw_list" | tr '，;\n\t ' ',,,,,')
+
+    local rules=""
+    local entry=""
+    IFS=',' read -r -a entries <<< "$normalized"
+    for entry in "${entries[@]}"; do
+        entry=$(echo "$entry" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [ -z "$entry" ] && continue
+        rules+="allow ${entry}; "
+    done
+
+    if [ -n "$rules" ]; then
+        rules+="deny all;"
+    fi
+
+    echo "$rules"
+}
+
+IP_ALLOW_RULES=$(build_ip_allow_rules "$IP_ALLOWLIST")
 
 # -----------------------------------------------------------------------------
 # Upload / Proxy settings (for /api -> tgo-api)
@@ -131,6 +163,7 @@ else
     # Strip /api prefix when forwarding to backend
     location ~ ^/api(/|$) {
         rewrite ^/api(/.*)$ $1 break;
+        IP_ALLOW_RULES
         proxy_pass http://tgo-api:8000;
         # Upload settings (configured via .env)
         client_max_body_size CLIENT_MAX_BODY_SIZE;
@@ -149,6 +182,7 @@ else
     # Swagger UI (and other clients) may request /v1/openapi.json directly.
     # In non-SSL (HTTP) mode, without this rule /v1 would fall through to frontend upstream and return HTML.
     location ~ ^/v1(/|$) {
+        IP_ALLOW_RULES
         proxy_pass http://tgo-api:8000;
         # Upload settings (configured via .env)
         client_max_body_size CLIENT_MAX_BODY_SIZE;
@@ -169,6 +203,7 @@ else
         # Strip /widget prefix, default to / if nothing after /widget
         rewrite ^/widget(/.*)?$ $1 break;
         rewrite ^$ / break;
+        IP_ALLOW_RULES
         proxy_pass http://tgo-widget-app:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -180,6 +215,7 @@ else
     # Static assets for web and widget apps
     # Decide upstream (tgo-web vs tgo-widget-app) based on Referer
     location /assets/ {
+        IP_ALLOW_RULES
         proxy_pass http://$assets_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -191,6 +227,7 @@ else
     # Web / widget HTML and other resources (root path)
     # Choose upstream (tgo-web or tgo-widget-app) based on Referer
     location / {
+        IP_ALLOW_RULES
         proxy_pass http://$assets_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -217,6 +254,7 @@ server {
     }
 
     location / {
+        IP_ALLOW_RULES
         proxy_pass http://wukongim:5200;
         proxy_http_version 1.1;
         proxy_redirect off;
@@ -250,6 +288,7 @@ server {
     ssl_prefer_server_ciphers on;
 
     location / {
+        IP_ALLOW_RULES
         proxy_pass http://tgo-web:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -271,6 +310,7 @@ server {
     ssl_prefer_server_ciphers on;
 
     location / {
+        IP_ALLOW_RULES
         proxy_pass http://tgo-widget-app:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -292,6 +332,7 @@ server {
     ssl_prefer_server_ciphers on;
 
     location / {
+        IP_ALLOW_RULES
         proxy_pass http://tgo-api:8000;
         # Upload settings (configured via .env)
         client_max_body_size CLIENT_MAX_BODY_SIZE;
@@ -320,6 +361,7 @@ server {
     ssl_prefer_server_ciphers on;
 
     location / {
+        IP_ALLOW_RULES
         proxy_pass http://wukongim:5200;
         proxy_redirect off;
         proxy_http_version 1.1;
@@ -357,6 +399,7 @@ server {
     # Strip /api prefix when forwarding to backend
     location ~ ^/api(/|$) {
         rewrite ^/api(/.*)$ $1 break;
+        IP_ALLOW_RULES
         proxy_pass http://tgo-api:8000;
         # Upload settings (configured via .env)
         client_max_body_size CLIENT_MAX_BODY_SIZE;
@@ -375,6 +418,7 @@ server {
     # Swagger UI served from /api/v1/docs references /v1/openapi.json by default.
     # In localhost unified mode, /v1 would otherwise go to tgo-web, causing Swagger to load HTML instead of OpenAPI JSON.
     location ~ ^/v1(/|$) {
+        IP_ALLOW_RULES
         proxy_pass http://tgo-api:8000;
         # Upload settings (configured via .env)
         client_max_body_size CLIENT_MAX_BODY_SIZE;
@@ -395,6 +439,7 @@ server {
         # Strip /widget prefix, default to / if nothing after /widget
         rewrite ^/widget(/.*)?$ $1 break;
         rewrite ^$ / break;
+        IP_ALLOW_RULES
         proxy_pass http://tgo-widget-app:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -405,6 +450,7 @@ server {
 
     # Web service (default, root path)
     location / {
+        IP_ALLOW_RULES
         proxy_pass http://tgo-web:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -422,6 +468,7 @@ cat "$NGINX_CONF_DIR/default.conf" | sed "s/WEB_DOMAIN/$WEB_DOMAIN/g" | \
   sed "s/WIDGET_DOMAIN/$WIDGET_DOMAIN/g" | \
   sed "s/API_DOMAIN/$API_DOMAIN/g" | \
   sed "s/WS_DOMAIN/$WS_DOMAIN/g" | \
+  sed "s|IP_ALLOW_RULES|$IP_ALLOW_RULES|g" | \
   sed "s/CLIENT_MAX_BODY_SIZE/$NGINX_CLIENT_MAX_BODY_SIZE/g" | \
   sed "s/NGINX_PROXY_READ_TIMEOUT/$NGINX_PROXY_READ_TIMEOUT/g" | \
   sed "s/NGINX_PROXY_SEND_TIMEOUT/$NGINX_PROXY_SEND_TIMEOUT/g" | \
