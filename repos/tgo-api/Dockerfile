@@ -12,14 +12,28 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # System build deps (only for build stage)
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    switch_to_aliyun() { \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    }; \
+    switch_to_debian() { \
+        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list; \
+    }; \
+    if getent hosts mirrors.aliyun.com >/dev/null 2>&1; then \
+        switch_to_aliyun; \
+    fi; \
+    if ! apt-get update; then \
+        echo "apt-get update failed, fallback to deb.debian.org"; \
+        switch_to_debian; \
+        apt-get update; \
+    fi; \
+    apt-get install -y --no-install-recommends \
         build-essential \
         gcc \
-        libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+        libpq-dev; \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Poetry (pinned)
 RUN pip install poetry==1.8.3
@@ -59,13 +73,27 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Minimal runtime deps (no compilers)
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    switch_to_aliyun() { \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    }; \
+    switch_to_debian() { \
+        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list; \
+    }; \
+    if getent hosts mirrors.aliyun.com >/dev/null 2>&1; then \
+        switch_to_aliyun; \
+    fi; \
+    if ! apt-get update; then \
+        echo "apt-get update failed, fallback to deb.debian.org"; \
+        switch_to_debian; \
+        apt-get update; \
+    fi; \
+    apt-get install -y --no-install-recommends \
         libpq-dev \
-        curl \
-    && rm -rf /var/lib/apt/lists/*
+        curl; \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy virtualenv from builder (keep same path to preserve shebang)
 COPY --from=builder /app/.venv /app/.venv
