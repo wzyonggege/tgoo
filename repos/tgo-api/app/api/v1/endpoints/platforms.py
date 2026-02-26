@@ -1,7 +1,7 @@
 """Platform endpoints."""
 
 from datetime import datetime
-from typing import List, Any
+from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Header, UploadFile, File
@@ -494,10 +494,6 @@ async def enable_platform(
     db.commit()
     db.refresh(platform)
 
-    # Auto-configure Telegram webhook when platform is enabled
-    if platform.type == "telegram":
-        await _setup_telegram_webhook(platform)
-
     # Notify tgo-platform to start Slack Socket Mode handler
     if platform.type == "slack":
         await _notify_slack_platform_reload(platform)
@@ -529,10 +525,6 @@ async def disable_platform(
     if not platform:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Platform not found")
 
-    # Delete Telegram webhook when platform is disabled
-    if platform.type == "telegram":
-        await _delete_telegram_webhook(platform)
-
     # Notify tgo-platform to stop Slack Socket Mode handler
     if platform.type == "slack":
         await _notify_slack_platform_stop(str(platform.id))
@@ -544,81 +536,6 @@ async def disable_platform(
 
     logger.info("Platform %s disabled by user %s", str(platform.id), current_user.username)
     return _build_platform_response(platform, language=x_user_language)
-
-
-async def _setup_telegram_webhook(platform: Platform) -> None:
-    """Auto-configure Telegram Bot webhook when platform is enabled."""
-    config = platform.config or {}
-    bot_token = config.get("bot_token")
-    
-    if not bot_token:
-        logger.warning(
-            "Telegram platform %s enabled but no bot_token configured",
-            str(platform.id)
-        )
-        return
-    
-    # Build webhook URL
-    webhook_url = f"{settings.API_BASE_URL.rstrip('/')}/v1/platforms/callback/{platform.api_key}"
-    webhook_secret = config.get("webhook_secret")
-    
-    try:
-        # Call Telegram setWebhook API
-        payload: dict[str, Any] = {"url": webhook_url}
-        if webhook_secret:
-            payload["secret_token"] = webhook_secret
-        
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/setWebhook",
-                json=payload
-            )
-            result = response.json()
-            
-            if result.get("ok"):
-                logger.info(
-                    "Telegram webhook set for platform %s: %s",
-                    str(platform.id), webhook_url
-                )
-            else:
-                logger.error(
-                    "Failed to set Telegram webhook for platform %s: %s",
-                    str(platform.id), result.get("description", "Unknown error")
-                )
-    except Exception as e:
-        logger.error(
-            "Error setting Telegram webhook for platform %s: %s",
-            str(platform.id), str(e)
-        )
-
-
-async def _delete_telegram_webhook(platform: Platform) -> None:
-    """Delete Telegram Bot webhook when platform is disabled."""
-    config = platform.config or {}
-    bot_token = config.get("bot_token")
-    
-    if not bot_token:
-        return
-    
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
-            )
-            result = response.json()
-            
-            if result.get("ok"):
-                logger.info("Telegram webhook deleted for platform %s", str(platform.id))
-            else:
-                logger.warning(
-                    "Failed to delete Telegram webhook for platform %s: %s",
-                    str(platform.id), result.get("description", "Unknown error")
-                )
-    except Exception as e:
-        logger.warning(
-            "Error deleting Telegram webhook for platform %s: %s",
-            str(platform.id), str(e)
-        )
 
 
 async def _notify_slack_platform_reload(platform: Platform) -> None:
