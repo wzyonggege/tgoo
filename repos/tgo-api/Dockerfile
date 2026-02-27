@@ -13,18 +13,18 @@ WORKDIR /app
 
 # No apt deps in builder: Python wheels cover current runtime dependencies.
 
-# Install Poetry (pinned)
-RUN pip install poetry==1.8.3
-
-# Configure Poetry to use a local venv
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_CREATE=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
-
-# Install Python deps
-COPY pyproject.toml poetry.lock* ./
-RUN poetry install --only=main --no-root && rm -rf "$POETRY_CACHE_DIR"
+# Install Python deps into local venv (without Poetry)
+COPY requirements.runtime.txt ./
+RUN set -eux; \
+    python -m venv /app/.venv; \
+    /app/.venv/bin/pip install --upgrade pip setuptools wheel; \
+    install_requirements() { \
+        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -r requirements.runtime.txt && return 0; \
+        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -i https://pypi.org/simple -r requirements.runtime.txt && return 0; \
+        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.runtime.txt && return 0; \
+        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -i https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com -r requirements.runtime.txt; \
+    }; \
+    install_requirements
 
 # Copy application source (for things like Alembic env, etc.)
 COPY . .
