@@ -870,6 +870,7 @@ async def _get_available_staff_candidates(
     staff_query = db.query(Staff).filter(
         Staff.project_id == project_id,
         Staff.deleted_at.is_(None),
+        Staff.role == StaffRole.USER.value,
         Staff.is_active == True,  # noqa: E712 - SQLAlchemy requires == for boolean
         Staff.service_paused == False,  # noqa: E712 - SQLAlchemy requires == for boolean
     )

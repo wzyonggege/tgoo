@@ -205,7 +205,7 @@ def _build_staff_channel_response(
     channel_type: int,
 ) -> ChannelInfoResponse:
     """Build channel response for staff entity."""
-    name = staff.nickname or "Unknown Staff"
+    name = staff.nickname or staff.name or staff.username or "Unknown Staff"
     avatar = staff.avatar_url or ""
     extra = {
         "staff_id": str(staff.id),
