@@ -11,20 +11,28 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# No apt deps in builder: Python wheels cover current runtime dependencies.
+# System build deps (only for build stage)
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps into local venv (without Poetry)
-COPY requirements.runtime.txt ./
-RUN set -eux; \
-    python -m venv /app/.venv; \
-    /app/.venv/bin/pip install --upgrade pip setuptools wheel; \
-    install_requirements() { \
-        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -r requirements.runtime.txt && return 0; \
-        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -i https://pypi.org/simple -r requirements.runtime.txt && return 0; \
-        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.runtime.txt && return 0; \
-        /app/.venv/bin/pip install --prefer-binary --retries 3 --timeout 60 -i https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com -r requirements.runtime.txt; \
-    }; \
-    install_requirements
+# Install Poetry (pinned)
+RUN pip install poetry==1.8.3
+
+# Configure Poetry to use a local venv
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=1 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+# Install Python deps
+COPY pyproject.toml poetry.lock* ./
+RUN poetry install --only=main --no-root && rm -rf "$POETRY_CACHE_DIR"
 
 # Copy application source (for things like Alembic env, etc.)
 COPY . .
@@ -50,7 +58,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# No apt deps in runtime: avoid external apt mirror dependency.
+# Minimal runtime deps (no compilers)
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libpq-dev \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy virtualenv from builder (keep same path to preserve shebang)
 COPY --from=builder /app/.venv /app/.venv
@@ -72,7 +87,7 @@ EXPOSE 8001
 
 # Health check (both services)
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5); urllib.request.urlopen('http://localhost:8001/health', timeout=5)"
+    CMD curl -f http://localhost:8000/health && curl -f http://localhost:8001/health || exit 1
 
 # Run the application via uvicorn directly (no Poetry at runtime)
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 & uvicorn app.internal:internal_app --host 0.0.0.0 --port 8001 & wait"]
