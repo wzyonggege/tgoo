@@ -21,13 +21,18 @@ RUN set -eux; \
         sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
         sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list; \
     }; \
+    refresh_apt_index() { \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*; \
+        apt-get update; \
+    }; \
     if getent hosts mirrors.aliyun.com >/dev/null 2>&1; then \
         switch_to_aliyun; \
     fi; \
-    if ! apt-get update; then \
-        echo "apt-get update failed, fallback to deb.debian.org"; \
+    if ! refresh_apt_index || ! apt-cache show build-essential >/dev/null 2>&1; then \
+        echo "apt index invalid on current mirror, fallback to deb.debian.org"; \
         switch_to_debian; \
-        apt-get update; \
+        refresh_apt_index; \
     fi; \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -82,13 +87,18 @@ RUN set -eux; \
         sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
         sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list; \
     }; \
+    refresh_apt_index() { \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*; \
+        apt-get update; \
+    }; \
     if getent hosts mirrors.aliyun.com >/dev/null 2>&1; then \
         switch_to_aliyun; \
     fi; \
-    if ! apt-get update; then \
-        echo "apt-get update failed, fallback to deb.debian.org"; \
+    if ! refresh_apt_index || ! apt-cache show libpq-dev >/dev/null 2>&1; then \
+        echo "apt index invalid on current mirror, fallback to deb.debian.org"; \
         switch_to_debian; \
-        apt-get update; \
+        refresh_apt_index; \
     fi; \
     apt-get install -y --no-install-recommends \
         libpq-dev \
