@@ -11,34 +11,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# System build deps (only for build stage)
-RUN set -eux; \
-    switch_to_aliyun() { \
-        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
-    }; \
-    switch_to_debian() { \
-        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list; \
-    }; \
-    refresh_apt_index() { \
-        apt-get clean; \
-        rm -rf /var/lib/apt/lists/*; \
-        apt-get update; \
-    }; \
-    if getent hosts mirrors.aliyun.com >/dev/null 2>&1; then \
-        switch_to_aliyun; \
-    fi; \
-    if ! refresh_apt_index || ! apt-cache show build-essential >/dev/null 2>&1; then \
-        echo "apt index invalid on current mirror, fallback to deb.debian.org"; \
-        switch_to_debian; \
-        refresh_apt_index; \
-    fi; \
-    apt-get install -y --no-install-recommends \
-        build-essential \
-        gcc \
-        libpq-dev; \
-    rm -rf /var/lib/apt/lists/*
+# No apt deps in builder: Python wheels cover current runtime dependencies.
 
 # Install Poetry (pinned)
 RUN pip install poetry==1.8.3
@@ -77,33 +50,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Minimal runtime deps (no compilers)
-RUN set -eux; \
-    switch_to_aliyun() { \
-        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
-    }; \
-    switch_to_debian() { \
-        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-        sed -i 's|mirrors.aliyun.com|deb.debian.org|g' /etc/apt/sources.list; \
-    }; \
-    refresh_apt_index() { \
-        apt-get clean; \
-        rm -rf /var/lib/apt/lists/*; \
-        apt-get update; \
-    }; \
-    if getent hosts mirrors.aliyun.com >/dev/null 2>&1; then \
-        switch_to_aliyun; \
-    fi; \
-    if ! refresh_apt_index || ! apt-cache show libpq-dev >/dev/null 2>&1; then \
-        echo "apt index invalid on current mirror, fallback to deb.debian.org"; \
-        switch_to_debian; \
-        refresh_apt_index; \
-    fi; \
-    apt-get install -y --no-install-recommends \
-        libpq-dev \
-        curl; \
-    rm -rf /var/lib/apt/lists/*
+# No apt deps in runtime: avoid external apt mirror dependency.
 
 # Copy virtualenv from builder (keep same path to preserve shebang)
 COPY --from=builder /app/.venv /app/.venv
@@ -125,7 +72,7 @@ EXPOSE 8001
 
 # Health check (both services)
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health && curl -f http://localhost:8001/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5); urllib.request.urlopen('http://localhost:8001/health', timeout=5)"
 
 # Run the application via uvicorn directly (no Poetry at runtime)
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 & uvicorn app.internal:internal_app --host 0.0.0.0 --port 8001 & wait"]
