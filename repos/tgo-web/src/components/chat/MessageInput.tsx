@@ -1287,7 +1287,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   // If visitor is assigned to another staff, don't show input area
   // Only check when assignedStaffId exists and is not the current user
-  const isNotMyVisitor = assignedStaffId && user?.id && assignedStaffId !== user.id;
+  const isAdmin = user?.role === 'admin';
+  const isNotMyVisitor = assignedStaffId && user?.id && assignedStaffId !== user.id && !isAdmin;
   if (isNotMyVisitor) {
     const staffDisplayName = assignedStaffName || t('chat.input.otherAgent', '其他坐席');
     return (

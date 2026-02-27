@@ -31,6 +31,7 @@ from app.models import (
     Platform,
     SessionStatus,
     Staff,
+    StaffRole,
     Visitor,
     VisitorSession,
     ChannelMemoryClearance,
@@ -56,7 +57,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 from app.services.file_service import sanitize_filename, get_safe_ascii_filename
 from app.services.chat_service import get_or_create_visitor
-from app.services.transfer_service import transfer_to_staff
+from app.services.transfer_service import reassign_to_staff, transfer_to_staff
 from app.models import AssignmentSource
 from app.services.wukongim_client import wukongim_client
 from app.utils.const import CHANNEL_TYPE_CUSTOMER_SERVICE, MEMBER_TYPE_STAFF, MessageType
@@ -576,20 +577,6 @@ async def staff_send_platform_message(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid channel_id format")
 
-    membership = (
-        db.query(ChannelMember)
-        .filter(
-            ChannelMember.channel_id == req.channel_id,
-            ChannelMember.channel_type == req.channel_type,
-            ChannelMember.member_id == current_user.id,
-            ChannelMember.member_type == MEMBER_TYPE_STAFF,
-            ChannelMember.deleted_at.is_(None),
-        )
-        .first()
-    )
-    if not membership:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff not assigned to this channel")
-
     visitor = (
         db.query(Visitor)
         .options(joinedload(Visitor.platform))
@@ -602,6 +589,35 @@ async def staff_send_platform_message(
     )
     if not visitor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visitor not found")
+
+    membership = (
+        db.query(ChannelMember)
+        .filter(
+            ChannelMember.channel_id == req.channel_id,
+            ChannelMember.channel_type == req.channel_type,
+            ChannelMember.member_id == current_user.id,
+            ChannelMember.member_type == MEMBER_TYPE_STAFF,
+            ChannelMember.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not membership:
+        if current_user.role != StaffRole.ADMIN.value:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff not assigned to this channel")
+
+        takeover_result = await reassign_to_staff(
+            db=db,
+            visitor_id=visitor_uuid,
+            project_id=current_user.project_id,
+            new_staff_id=current_user.id,
+            assigned_by_staff_id=current_user.id,
+            notes="Admin takeover via message send",
+        )
+        if not takeover_result.success or takeover_result.assigned_staff_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Admin takeover failed: {takeover_result.message}",
+            )
 
     platform = visitor.platform
     if not platform or platform.deleted_at is not None:
