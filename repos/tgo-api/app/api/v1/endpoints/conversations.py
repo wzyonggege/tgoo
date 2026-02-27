@@ -214,6 +214,58 @@ class WuKongIMConversationWithChannelsPaginatedResponse(BaseModel):
     pagination: PaginationMetadata = Field(..., description="Pagination metadata")
 
 
+async def _sync_project_latest_conversations_for_admin(
+    db: Session,
+    current_user: Staff,
+    msg_count: int,
+) -> List[WuKongIMConversation]:
+    """Sync latest conversations for all visitors in current project (admin view)."""
+    latest_session_subquery = (
+        db.query(
+            VisitorSession.visitor_id,
+            func.max(VisitorSession.created_at).label("latest_created_at"),
+        )
+        .filter(
+            VisitorSession.project_id == current_user.project_id,
+            VisitorSession.visitor_id.isnot(None),
+            VisitorSession.staff_id.isnot(None),
+        )
+        .group_by(VisitorSession.visitor_id)
+        .subquery()
+    )
+
+    visitor_ids = [
+        row[0]
+        for row in (
+            db.query(latest_session_subquery.c.visitor_id)
+            .order_by(latest_session_subquery.c.latest_created_at.desc())
+            .all()
+        )
+    ]
+
+    if not visitor_ids:
+        return []
+
+    channels = [
+        {
+            "channel_id": build_visitor_channel_id(visitor_id),
+            "channel_type": CHANNEL_TYPE_CUSTOMER_SERVICE,
+        }
+        for visitor_id in visitor_ids
+    ]
+
+    staff_uid = f"{current_user.id}-staff"
+    raw_conversations = await wukongim_client.sync_conversations_by_channels(
+        uid=staff_uid,
+        channels=channels,
+        msg_count=msg_count,
+    )
+
+    return [
+        conv.model_copy(update={"unread": 0}) for conv in raw_conversations
+    ]
+
+
 @router.post(
     "/my",
     response_model=WuKongIMConversationWithChannelsResponse,
@@ -241,23 +293,31 @@ async def sync_my_conversations(
     直接从 WuKongIM 获取当前客服参与的所有会话及其最近消息记录，
     包括已关闭的历史会话。同时返回每个会话对应的频道详细信息。
     """
-    staff_uid = f"{current_user.id}-staff"
+    is_admin = current_user.role == StaffRole.ADMIN.value
 
     logger.info(
         f"Staff {current_user.username} syncing my conversations",
         extra={
             "staff_username": current_user.username,
-            "staff_uid": staff_uid,
+            "staff_uid": f"{current_user.id}-staff",
+            "is_admin": is_admin,
             "msg_count": request.msg_count,
         }
     )
 
     try:
-        conversations = await wukongim_client.sync_conversations(
-            uid=staff_uid,
-            last_msg_seqs=request.last_msg_seqs,
-            msg_count=request.msg_count,
-        )
+        if is_admin:
+            conversations = await _sync_project_latest_conversations_for_admin(
+                db=db,
+                current_user=current_user,
+                msg_count=request.msg_count,
+            )
+        else:
+            conversations = await wukongim_client.sync_conversations(
+                uid=f"{current_user.id}-staff",
+                last_msg_seqs=request.last_msg_seqs,
+                msg_count=request.msg_count,
+            )
 
         logger.info(f"Successfully synced {len(conversations)} conversations for staff {current_user.username}")
 
