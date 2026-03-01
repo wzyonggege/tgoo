@@ -403,10 +403,16 @@ Content-Type: application/json
 Content-Type: application/json
 
 {
+  "platform_api_key": "${apiKey || 'ak_live_xxx'}",
   "message_id": "msg_123",
-  "user": "third_party_user_123",
-  "content": "客服回复的消息内容",
-  "timestamp": "2024-01-01T12:00:00Z"
+  "channel_id": "550e8400-e29b-41d4-a716-446655440000-vtr",
+  "channel_type": 251,
+  "platform_open_id": "third_party_user_123",
+  "client_msg_no": "staff_abc123",
+  "payload": {
+    "type": 1,
+    "content": "客服回复的消息内容"
+  }
 }`}
                 </code>
               </div>
@@ -415,10 +421,12 @@ Content-Type: application/json
               <div>
                 <p className="font-medium text-gray-800 dark:text-gray-100 mb-1">{t('platforms.custom.integration.fieldDescriptions', '字段说明')}</p>
                 <ul className="list-disc list-inside text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">platform_api_key</code>: {t('platforms.custom.integration.callbackPlatformApiKeyDesc', '平台 API Key，用于第三方侧识别渠道')}</li>
                   <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">message_id</code>: {t('platforms.custom.integration.messageIdDesc', '消息唯一标识')}</li>
-                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">user</code>: {t('platforms.custom.integration.callbackUserDesc', '第三方用户标识（与对话接口中的 user 字段对应）')}</li>
-                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">content</code>: {t('platforms.custom.integration.contentDesc', '客服回复的消息内容')}</li>
-                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">timestamp</code>: {t('platforms.custom.integration.timestampDesc', '消息时间戳（ISO 8601 格式）')}</li>
+                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">channel_id / channel_type</code>: {t('platforms.custom.integration.callbackChannelDesc', '会话通道标识（可用于会话归类）')}</li>
+                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">platform_open_id</code>: {t('platforms.custom.integration.callbackUserDesc', '第三方用户标识（与对话接口中的 user 字段对应）')}</li>
+                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">client_msg_no</code>: {t('platforms.custom.integration.callbackClientMsgNoDesc', '客户端幂等 ID（无则由系统生成）')}</li>
+                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">payload</code>: {t('platforms.custom.integration.callbackPayloadDesc', '消息体，文本消息内容在 payload.content')}</li>
                 </ul>
               </div>
 
@@ -457,7 +465,6 @@ Content-Type: application/json
 };
 
 export default CustomPlatformConfig;
-
 
 
 
