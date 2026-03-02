@@ -16,6 +16,7 @@ from app.models.permission import Permission, RolePermission, ProjectRolePermiss
 from app.models.visitor_assignment_rule import VisitorAssignmentRule, DEFAULT_ASSIGNMENT_PROMPT
 from app.models.visitor_assignment_history import VisitorAssignmentHistory, AssignmentSource
 from app.models.visitor_session import VisitorSession, SessionStatus
+from app.models.quick_reply import QuickReply
 from app.models.visitor_waiting_queue import (
     VisitorWaitingQueue,
     WaitingStatus,
@@ -49,6 +50,7 @@ __all__ = [
     "DEFAULT_ASSIGNMENT_PROMPT",
     "VisitorAssignmentHistory",
     "VisitorSession",
+    "QuickReply",
     "VisitorWaitingQueue",
     "URGENCY_PRIORITY_MAP",
     "ChannelMemoryClearance",

@@ -81,6 +81,13 @@ DEFAULT_PERMISSIONS: List[Tuple[str, str, str]] = [
     ("platforms", "update", "Update platforms"),
     ("platforms", "delete", "Delete platforms"),
     ("platforms", "list", "List all platforms"),
+
+    # Quick replies permissions
+    ("quick_replies", "create", "Create quick replies"),
+    ("quick_replies", "read", "View quick replies"),
+    ("quick_replies", "update", "Update quick replies"),
+    ("quick_replies", "delete", "Delete quick replies"),
+    ("quick_replies", "list", "List quick replies"),
     
     # Permissions management (admin only by design)
     ("permissions", "read", "View permission definitions"),
@@ -131,6 +138,13 @@ DEFAULT_USER_GLOBAL_PERMISSIONS: List[Tuple[str, str]] = [
     # Users can view platforms but not manage
     ("platforms", "read"),
     ("platforms", "list"),
+
+    # Users can manage quick replies
+    ("quick_replies", "create"),
+    ("quick_replies", "read"),
+    ("quick_replies", "update"),
+    ("quick_replies", "delete"),
+    ("quick_replies", "list"),
 ]
 
 

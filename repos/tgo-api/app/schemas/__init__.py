@@ -41,6 +41,13 @@ from app.schemas.project import (
     ProjectResponse,
     ProjectUpdate,
 )
+from app.schemas.quick_reply import (
+    QuickReplyCreate,
+    QuickReplyListParams,
+    QuickReplyListResponse,
+    QuickReplyResponse,
+    QuickReplyUpdate,
+)
 from app.schemas.rag import (
     BatchFileUploadResponse,
     BatchUploadSummary,
@@ -198,6 +205,12 @@ __all__ = [
     "ProjectInDB",
     "ProjectResponse",
     "ProjectListResponse",
+    # Quick reply schemas
+    "QuickReplyCreate",
+    "QuickReplyUpdate",
+    "QuickReplyResponse",
+    "QuickReplyListParams",
+    "QuickReplyListResponse",
     # Platform schemas
     "PlatformCreate",
     "PlatformUpdate",

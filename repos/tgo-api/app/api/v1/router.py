@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     email,
     platforms,
     projects,
+    quick_replies,
     search,
     setup,
     sessions,
@@ -63,6 +64,12 @@ api_router.include_router(
     tags.router,
     prefix="/tags",
     tags=["Tags"]
+)
+
+api_router.include_router(
+    quick_replies.router,
+    prefix="/quick-replies",
+    tags=["Quick Replies"],
 )
 
 api_router.include_router(
