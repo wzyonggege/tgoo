@@ -60,6 +60,15 @@ interface SlashTokenMatch {
   query: string;
 }
 
+const isSameSlashToken = (
+  prev: SlashTokenMatch | null,
+  next: SlashTokenMatch | null
+): boolean => {
+  if (prev === null && next === null) return true;
+  if (prev === null || next === null) return false;
+  return prev.slashIndex === next.slashIndex && prev.query === next.query;
+};
+
 const resolveSlashToken = (text: string, cursorPos: number): SlashTokenMatch | null => {
   if (cursorPos < 0 || cursorPos > text.length) return null;
   const beforeCursor = text.slice(0, cursorPos);
@@ -1384,11 +1393,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const syncSlashTokenFromTextarea = useCallback((value: string, cursorPos: number) => {
     const token = resolveSlashToken(value, cursorPos);
-    setSlashToken(token);
+    setSlashToken((prev) => {
+      if (!isSameSlashToken(prev, token)) {
+        setQuickReplySelectedIndex(0);
+      }
+      return token;
+    });
     setQuickReplyOpen(token !== null);
-    if (token) {
-      setQuickReplySelectedIndex(0);
-    }
   }, []);
 
   const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
@@ -1403,6 +1414,20 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (!textarea) return;
     syncSlashTokenFromTextarea(textarea.value, textarea.selectionStart ?? textarea.value.length);
   }, [syncSlashTokenFromTextarea]);
+
+  const handleTextareaKeyUp = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      quickReplyOpen &&
+      (event.key === 'ArrowDown' ||
+        event.key === 'ArrowUp' ||
+        event.key === 'Enter' ||
+        event.key === 'Tab' ||
+        event.key === 'Escape')
+    ) {
+      return;
+    }
+    handleTextareaCursorSync();
+  }, [handleTextareaCursorSync, quickReplyOpen]);
 
   useEffect(() => {
     if (!isManualDisabled) return;
@@ -1620,6 +1645,61 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
 
 
+      {quickReplyOpen && (
+        <div className="mt-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 max-h-56 overflow-y-auto">
+          {quickReplyLoading ? (
+            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+              {t('chat.input.quickReply.loading', '正在加载快捷回复...')}
+            </div>
+          ) : quickReplyError ? (
+            <div className="px-3 py-2 text-xs text-red-500">
+              {t('chat.input.quickReply.loadFailed', '快捷回复加载失败')}
+            </div>
+          ) : quickReplySuggestions.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+              {t('chat.input.quickReply.empty', '没有匹配的快捷回复')}
+            </div>
+          ) : (
+            <ul className="py-1">
+              {quickReplySuggestions.map((item, index) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={`w-full text-left px-3 py-2 transition-colors ${
+                      index === quickReplySelectedIndex
+                        ? 'bg-blue-50 dark:bg-blue-900/30'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                    }`}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      void applyQuickReply(item);
+                    }}
+                    onMouseEnter={() => setQuickReplySelectedIndex(index)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {item.title}
+                      </span>
+                      <span className="text-xs font-mono text-blue-600 dark:text-blue-300 shrink-0">
+                        /{item.shortcut}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
+                      {item.content}
+                    </p>
+                    <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      {t('chat.input.quickReply.usedCount', '使用 {{count}} 次', {
+                        count: item.usage_count,
+                      })}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {/* Selected files preview (documents) */}
       {selectedFiles.length > 0 && (
         <div className="mt-2">
@@ -1692,60 +1772,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       {/* Message input */}
       <div className="mt-2">
-        {quickReplyOpen && (
-          <div className="mb-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 max-h-56 overflow-y-auto">
-            {quickReplyLoading ? (
-              <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                {t('chat.input.quickReply.loading', '正在加载快捷回复...')}
-              </div>
-            ) : quickReplyError ? (
-              <div className="px-3 py-2 text-xs text-red-500">
-                {t('chat.input.quickReply.loadFailed', '快捷回复加载失败')}
-              </div>
-            ) : quickReplySuggestions.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                {t('chat.input.quickReply.empty', '没有匹配的快捷回复')}
-              </div>
-            ) : (
-              <ul className="py-1">
-                {quickReplySuggestions.map((item, index) => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      className={`w-full text-left px-3 py-2 transition-colors ${
-                        index === quickReplySelectedIndex
-                          ? 'bg-blue-50 dark:bg-blue-900/30'
-                          : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                      }`}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        void applyQuickReply(item);
-                      }}
-                      onMouseEnter={() => setQuickReplySelectedIndex(index)}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                          {item.title}
-                        </span>
-                        <span className="text-xs font-mono text-blue-600 dark:text-blue-300 shrink-0">
-                          /{item.shortcut}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
-                        {item.content}
-                      </p>
-                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        {t('chat.input.quickReply.usedCount', '使用 {{count}} 次', {
-                          count: item.usage_count,
-                        })}
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
         <textarea
           ref={textareaRef}
           placeholder={isManualDisabled ? t('chat.input.disabled.placeholder', 'AI助手已启用，无法手动输入') : t('chat.input.placeholder', '输入消息...')}
@@ -1755,7 +1781,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
           onKeyDown={handleKeyPress}
           onClick={handleTextareaCursorSync}
           onSelect={handleTextareaCursorSync}
-          onKeyUp={handleTextareaCursorSync}
+          onKeyUp={handleTextareaKeyUp}
           onPaste={handlePaste}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
