@@ -23,6 +23,7 @@ import { toAbsoluteApiUrl } from '@/utils/url';
 import { getFileIcon } from '@/utils/fileIcons';
 import { chatMessagesApiService } from '@/services/chatMessagesApi';
 import { APIError } from '@/services/api';
+import { quickRepliesApiService, type QuickReply } from '@/services/quickRepliesApi';
 
 import { Smile, Scissors, Image as ImageIcon, Folder, Pause, Loader2, UserPlus } from 'lucide-react';
 
@@ -52,6 +53,25 @@ const getErrorMessage = (
     return t(fallbackKey, fallbackDefault);
   }
   return '上传失败';
+};
+
+interface SlashTokenMatch {
+  slashIndex: number;
+  query: string;
+}
+
+const resolveSlashToken = (text: string, cursorPos: number): SlashTokenMatch | null => {
+  if (cursorPos < 0 || cursorPos > text.length) return null;
+  const beforeCursor = text.slice(0, cursorPos);
+  const slashIndex = beforeCursor.lastIndexOf('/');
+  if (slashIndex < 0) return null;
+  if (slashIndex > 0) {
+    const prevChar = beforeCursor[slashIndex - 1];
+    if (!/\s/.test(prevChar)) return null;
+  }
+  const token = beforeCursor.slice(slashIndex + 1);
+  if (/\s/.test(token)) return null;
+  return { slashIndex, query: token.toLowerCase() };
 };
 
 interface MessageInputProps {
@@ -91,6 +111,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // Selected files (documents) preview state
   type SelectedFile = { id: string; file: File };
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [quickReplyLoading, setQuickReplyLoading] = useState<boolean>(false);
+  const [quickReplyError, setQuickReplyError] = useState<string | null>(null);
+  const [slashToken, setSlashToken] = useState<SlashTokenMatch | null>(null);
+  const [quickReplyOpen, setQuickReplyOpen] = useState<boolean>(false);
+  const [quickReplySelectedIndex, setQuickReplySelectedIndex] = useState<number>(0);
 
 
 
@@ -310,6 +336,117 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   // Local sending guard to prevent duplicate sends within this component
   const [isSendingLocal, setIsSendingLocal] = useState(false);
+
+  const loadQuickReplies = useCallback(async () => {
+    setQuickReplyLoading(true);
+    try {
+      const response = await quickRepliesApiService.listQuickReplies({
+        active_only: true,
+        limit: 500,
+        offset: 0,
+      });
+      setQuickReplies(response.data);
+      setQuickReplyError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load quick replies';
+      setQuickReplyError(message);
+      setQuickReplies([]);
+    } finally {
+      setQuickReplyLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadQuickReplies();
+  }, [loadQuickReplies]);
+
+  const quickReplySuggestions = useMemo(() => {
+    if (!slashToken) return [] as QuickReply[];
+    const query = slashToken.query.trim();
+    const scored = quickReplies.map((item) => {
+      let score = 0;
+      if (!query) {
+        score += 10;
+      } else {
+        if (item.shortcut.startsWith(query)) score += 120;
+        else if (item.shortcut.includes(query)) score += 80;
+        if (item.title.toLowerCase().startsWith(query)) score += 40;
+        else if (item.title.toLowerCase().includes(query)) score += 20;
+        if (item.content.toLowerCase().includes(query)) score += 10;
+      }
+      score += Math.min(item.usage_count, 30);
+      if (item.last_used_at) {
+        const ts = Date.parse(item.last_used_at);
+        if (!Number.isNaN(ts)) {
+          const hours = (Date.now() - ts) / (1000 * 60 * 60);
+          if (hours <= 24) score += 20;
+          else if (hours <= 72) score += 10;
+        }
+      }
+      return { item, score };
+    });
+
+    return scored
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (a.item.sort_order !== b.item.sort_order) return a.item.sort_order - b.item.sort_order;
+        return b.item.usage_count - a.item.usage_count;
+      })
+      .slice(0, 8)
+      .map((entry) => entry.item);
+  }, [quickReplies, slashToken]);
+
+  useEffect(() => {
+    if (!quickReplyOpen || quickReplySuggestions.length === 0) {
+      setQuickReplySelectedIndex(0);
+      return;
+    }
+    setQuickReplySelectedIndex((prev) => Math.min(prev, quickReplySuggestions.length - 1));
+  }, [quickReplyOpen, quickReplySuggestions.length]);
+
+  const applyQuickReply = useCallback(async (quickReply: QuickReply) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const cursorPos = textarea.selectionStart ?? message.length;
+    const token = resolveSlashToken(message, cursorPos);
+    if (!token) return;
+
+    const before = message.slice(0, token.slashIndex);
+    const after = message.slice(cursorPos);
+    const replacement = quickReply.content;
+    const next = `${before}${replacement}${after}`;
+    const nextPos = (before + replacement).length;
+
+    setMessage(next);
+    setSlashToken(null);
+    setQuickReplyOpen(false);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      try {
+        textarea.selectionStart = nextPos;
+        textarea.selectionEnd = nextPos;
+      } catch {
+        // Ignore cursor set errors for non-focusable states
+      }
+    });
+
+    try {
+      await quickRepliesApiService.markUsed(quickReply.id);
+      const nowIso = new Date().toISOString();
+      setQuickReplies((prev) =>
+        prev.map((item) =>
+          item.id === quickReply.id
+            ? { ...item, usage_count: item.usage_count + 1, last_used_at: nowIso }
+            : item
+        )
+      );
+    } catch {
+      // Ignore usage metric update errors in input flow
+    }
+  }, [message]);
 
   const getImageDimensions = useCallback(async (file: File): Promise<{ width: number; height: number }> => {
     return new Promise((resolve) => {
@@ -637,6 +774,39 @@ const MessageInput: React.FC<MessageInputProps> = ({
       e.preventDefault();
       return;
     }
+
+    if (quickReplyOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (quickReplySuggestions.length > 0) {
+          setQuickReplySelectedIndex((prev) => (prev + 1) % quickReplySuggestions.length);
+        }
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (quickReplySuggestions.length > 0) {
+          setQuickReplySelectedIndex((prev) => (prev - 1 + quickReplySuggestions.length) % quickReplySuggestions.length);
+        }
+        return;
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && quickReplySuggestions.length > 0) {
+        if (isComposing) return;
+        e.preventDefault();
+        const selected = quickReplySuggestions[quickReplySelectedIndex] ?? quickReplySuggestions[0];
+        if (selected) {
+          void applyQuickReply(selected);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setQuickReplyOpen(false);
+        setSlashToken(null);
+        return;
+      }
+    }
+
     if (e.key === 'Enter') {
       // Don't handle Enter if IME is composing (Chinese input method active)
       if (isComposing) {
@@ -1212,9 +1382,33 @@ const MessageInput: React.FC<MessageInputProps> = ({
     setMessage('');
   }, [pastedItems, channelId, channelType, user?.id, addMessage, updateConversationLastMessage, moveConversationToTop, updateMessageByClientMsgNo, isConnected, sendWsMessage, showToast, showError, message, visitorExtra?.platform_type]);
 
+  const syncSlashTokenFromTextarea = useCallback((value: string, cursorPos: number) => {
+    const token = resolveSlashToken(value, cursorPos);
+    setSlashToken(token);
+    setQuickReplyOpen(token !== null);
+    if (token) {
+      setQuickReplySelectedIndex(0);
+    }
+  }, []);
+
   const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
-    setMessage(e.target.value);
+    const next = e.target.value;
+    const cursorPos = e.target.selectionStart ?? next.length;
+    setMessage(next);
+    syncSlashTokenFromTextarea(next, cursorPos);
   };
+
+  const handleTextareaCursorSync = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    syncSlashTokenFromTextarea(textarea.value, textarea.selectionStart ?? textarea.value.length);
+  }, [syncSlashTokenFromTextarea]);
+
+  useEffect(() => {
+    if (!isManualDisabled) return;
+    setQuickReplyOpen(false);
+    setSlashToken(null);
+  }, [isManualDisabled]);
 
   // Listen for plugin actions
   useEffect(() => {
@@ -1498,6 +1692,60 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       {/* Message input */}
       <div className="mt-2">
+        {quickReplyOpen && (
+          <div className="mb-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 max-h-56 overflow-y-auto">
+            {quickReplyLoading ? (
+              <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                {t('chat.input.quickReply.loading', '正在加载快捷回复...')}
+              </div>
+            ) : quickReplyError ? (
+              <div className="px-3 py-2 text-xs text-red-500">
+                {t('chat.input.quickReply.loadFailed', '快捷回复加载失败')}
+              </div>
+            ) : quickReplySuggestions.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                {t('chat.input.quickReply.empty', '没有匹配的快捷回复')}
+              </div>
+            ) : (
+              <ul className="py-1">
+                {quickReplySuggestions.map((item, index) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      className={`w-full text-left px-3 py-2 transition-colors ${
+                        index === quickReplySelectedIndex
+                          ? 'bg-blue-50 dark:bg-blue-900/30'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        void applyQuickReply(item);
+                      }}
+                      onMouseEnter={() => setQuickReplySelectedIndex(index)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                          {item.title}
+                        </span>
+                        <span className="text-xs font-mono text-blue-600 dark:text-blue-300 shrink-0">
+                          /{item.shortcut}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
+                        {item.content}
+                      </p>
+                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        {t('chat.input.quickReply.usedCount', '使用 {{count}} 次', {
+                          count: item.usage_count,
+                        })}
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           placeholder={isManualDisabled ? t('chat.input.disabled.placeholder', 'AI助手已启用，无法手动输入') : t('chat.input.placeholder', '输入消息...')}
@@ -1505,6 +1753,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
           value={message}
           onChange={handleMessageChange}
           onKeyDown={handleKeyPress}
+          onClick={handleTextareaCursorSync}
+          onSelect={handleTextareaCursorSync}
+          onKeyUp={handleTextareaCursorSync}
           onPaste={handlePaste}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}

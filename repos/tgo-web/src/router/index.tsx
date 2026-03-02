@@ -31,6 +31,7 @@ import StaffSettings from '../components/settings/StaffSettings';
 import NotificationSettings from '../components/settings/NotificationSettings';
 import AboutSettings from '../components/settings/AboutSettings';
 import ProviderSettings from '../components/settings/ProviderSettings';
+import ShortcutsSettings from '../components/settings/ShortcutsSettings';
 import MarkdownTestPage from '../pages/MarkdownTestPage';
 
 // Import SaaS routes if they exist (will be resolved via Vite alias or empty default)
@@ -82,6 +83,7 @@ export const router = createBrowserRouter([
               { path: 'profile', element: <ProfileSettings /> },
               { path: 'general', element: <GeneralSettings /> },
               { path: 'notifications', element: <NotificationSettings /> },
+              { path: 'shortcuts', element: <ShortcutsSettings /> },
               { path: 'staff', element: <StaffSettings /> },
               { path: 'providers', element: <ProviderSettings /> },
               { path: 'about', element: <AboutSettings /> },

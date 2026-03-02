@@ -109,6 +109,7 @@
       "general": "通用",
       "staff": "人工坐席",
       "notifications": "消息通知",
+      "shortcuts": "快捷回复",
       "providers": "模型提供商",
       "about": "关于",
       "logout": "退出登录"
@@ -280,6 +281,34 @@
       "conversationDisplay": "会话显示模式",
       "normal": "普通",
       "bubbleLeft": "气泡左对齐"
+    },
+    "shortcuts": {
+      "title": "快捷回复",
+      "search": "搜索标题、快捷词、内容",
+      "allCategories": "全部分类",
+      "empty": "暂无快捷回复",
+      "noCategory": "未分类",
+      "usedCount": "使用 {{count}} 次",
+      "create": "新建快捷回复",
+      "edit": "编辑快捷回复",
+      "new": "新建",
+      "saved": "快捷回复已保存",
+      "deleted": "快捷回复已删除",
+      "deleteConfirm": "确定删除该快捷回复吗？",
+      "form": {
+        "title": "标题",
+        "shortcut": "快捷词（如 refund）",
+        "category": "分类（可选）",
+        "content": "回复内容",
+        "order": "排序",
+        "active": "启用"
+      },
+      "error": {
+        "load": "加载快捷回复失败",
+        "required": "标题、快捷词和内容均为必填项",
+        "save": "保存快捷回复失败",
+        "delete": "删除快捷回复失败"
+      }
     },
     "storage": {
       "title": "存储管理",
@@ -3017,6 +3046,12 @@
       },
       "upload": {
         "failed": "上传失败"
+      },
+      "quickReply": {
+        "loading": "正在加载快捷回复...",
+        "loadFailed": "快捷回复加载失败",
+        "empty": "没有匹配的快捷回复",
+        "usedCount": "使用 {{count}} 次"
       },
       "shortcuts": {
         "sendWithHint": "Enter 发送 • {{hint}}",

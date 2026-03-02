@@ -109,6 +109,7 @@
       "general": "General",
       "staff": "Human Agents",
       "notifications": "Notifications",
+      "shortcuts": "Quick Replies",
       "providers": "Model Providers",
       "about": "About",
       "logout": "Logout"
@@ -280,6 +281,34 @@
       "conversationDisplay": "Conversation display mode",
       "normal": "Normal",
       "bubbleLeft": "Bubbles left-aligned"
+    },
+    "shortcuts": {
+      "title": "Quick Replies",
+      "search": "Search title, shortcut, content",
+      "allCategories": "All categories",
+      "empty": "No quick replies yet",
+      "noCategory": "Uncategorized",
+      "usedCount": "Used {{count}} times",
+      "create": "Create quick reply",
+      "edit": "Edit quick reply",
+      "new": "New",
+      "saved": "Quick reply saved",
+      "deleted": "Quick reply deleted",
+      "deleteConfirm": "Delete this quick reply?",
+      "form": {
+        "title": "Title",
+        "shortcut": "Shortcut (e.g. refund)",
+        "category": "Category (optional)",
+        "content": "Reply content",
+        "order": "Order",
+        "active": "Active"
+      },
+      "error": {
+        "load": "Failed to load quick replies",
+        "required": "Title, shortcut and content are required",
+        "save": "Failed to save quick reply",
+        "delete": "Failed to delete quick reply"
+      }
     },
     "storage": {
       "title": "Storage",
@@ -2141,6 +2170,12 @@
       },
       "upload": {
         "failed": "Upload failed"
+      },
+      "quickReply": {
+        "loading": "Loading quick replies...",
+        "loadFailed": "Failed to load quick replies",
+        "empty": "No matching quick replies",
+        "usedCount": "Used {{count}} times"
       },
       "errors": {
         "images": {
