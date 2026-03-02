@@ -342,7 +342,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     try {
       const response = await quickRepliesApiService.listQuickReplies({
         active_only: true,
-        limit: 500,
+        limit: 100,
         offset: 0,
       });
       setQuickReplies(response.data);

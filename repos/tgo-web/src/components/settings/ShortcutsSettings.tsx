@@ -44,7 +44,7 @@ const ShortcutsSettings: React.FC = () => {
     try {
       const response = await quickRepliesApiService.listQuickReplies({
         active_only: false,
-        limit: 500,
+        limit: 100,
         offset: 0,
       });
       setItems(response.data);

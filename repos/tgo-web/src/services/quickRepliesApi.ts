@@ -68,7 +68,10 @@ class QuickRepliesApiService extends BaseApiService {
     if (params?.q) qs.append('q', params.q);
     if (params?.category) qs.append('category', params.category);
     if (params?.active_only !== undefined) qs.append('active_only', String(params.active_only));
-    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.limit !== undefined) {
+      const safeLimit = Math.max(1, Math.min(params.limit, 100));
+      qs.append('limit', String(safeLimit));
+    }
     if (params?.offset !== undefined) qs.append('offset', String(params.offset));
     const endpoint = qs.toString() ? `${this.endpoints.LIST}?${qs.toString()}` : this.endpoints.LIST;
     return this.get<QuickReplyListResponse>(endpoint);
