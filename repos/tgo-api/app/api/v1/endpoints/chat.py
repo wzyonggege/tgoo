@@ -940,9 +940,15 @@ async def chat_completion_openai_compatible(
     platform, project = chat_service.validate_platform_and_project(x_platform_api_key, db)
 
     # 2) Extract messages from OpenAI format
-    user_message, system_message, platform_open_id = chat_service.extract_messages_from_openai_format(
+    user_message, system_message, platform_open_id, user_message_type = chat_service.extract_messages_from_openai_format(
         req.messages, req.user
     )
+
+    if user_message_type in {MessageType.IMAGE, MessageType.FILE}:
+        from app.services.storage import get_storage
+
+        storage = get_storage()
+        user_message = storage.resolve_url(user_message)
 
     # 3) Get or create visitor (handles status reset if CLOSED)
     visitor, visitor_changed = await get_or_create_visitor(
@@ -973,6 +979,7 @@ async def chat_completion_openai_compatible(
         channel_id=channel_id_enc,
         channel_type=channel_type,
         content=user_message,
+        msg_type=user_message_type,
         extra=None,
     )
 

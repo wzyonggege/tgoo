@@ -5,6 +5,7 @@ import asyncio
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple, AsyncGenerator
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -480,11 +481,70 @@ async def run_background_ai_interaction(
 # OpenAI Mapping Helpers
 # ============================================================================
 
+_IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".svg",
+    ".heic",
+    ".heif",
+    ".tif",
+    ".tiff",
+}
+
+_FILE_EXTENSIONS = {
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".csv",
+    ".md",
+    ".zip",
+    ".rar",
+    ".7z",
+}
+
+
+def infer_message_type_from_openai_content(content: str) -> MessageType:
+    """Infer message type from OpenAI-compatible string content.
+
+    For backwards compatibility, `/v1/chat/completions` still accepts a plain
+    string content. If the content looks like an image/file URL, we infer the
+    corresponding message type; otherwise fallback to TEXT.
+    """
+    normalized = (content or "").strip()
+    if not normalized:
+        return MessageType.TEXT
+
+    if normalized.lower().startswith("data:image/"):
+        return MessageType.IMAGE
+
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"}:
+        return MessageType.TEXT
+
+    path = parsed.path or ""
+    dot_index = path.rfind(".")
+    extension = path[dot_index:].lower() if dot_index >= 0 else ""
+
+    if extension in _IMAGE_EXTENSIONS:
+        return MessageType.IMAGE
+    if extension in _FILE_EXTENSIONS:
+        return MessageType.FILE
+    return MessageType.TEXT
+
 def extract_messages_from_openai_format(
     messages: list[OpenAIChatMessage],
     user_field: Optional[str] = None
-) -> tuple[str, Optional[str], str]:
-    """Extract user message, system message, and platform_open_id from OpenAI message format."""
+) -> tuple[str, Optional[str], str, MessageType]:
+    """Extract user message/system message/platform_open_id/message type."""
     user_message = None
     system_message = None
 
@@ -501,8 +561,9 @@ def extract_messages_from_openai_format(
         )
 
     platform_open_id = user_field or f"openai_user_{uuid4().hex[:8]}"
+    inferred_type = infer_message_type_from_openai_content(user_message)
 
-    return user_message, system_message, platform_open_id
+    return user_message, system_message, platform_open_id, inferred_type
 
 
 def estimate_token_usage(
