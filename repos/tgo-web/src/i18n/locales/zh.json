@@ -2179,6 +2179,7 @@
         "authDesc": "在请求头中添加平台 API 密钥：",
         "requiredParams": "必填参数",
         "messagesDesc": "对话消息数组，兼容 OpenAI ChatGPT API 格式",
+        "messageTypeDesc": "消息类型（可选）：1=文本，2=图片，3=文件",
         "userDesc": "第三方平台用户的唯一标识 (必填)",
         "optionalFeatures": "可选功能",
         "visitorRegisterDesc": "如果您需要传递详细的用户信息（名称、头像等），可以先调用访客注册 API：",

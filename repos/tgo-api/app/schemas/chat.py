@@ -164,6 +164,11 @@ class OpenAIChatMessage(BaseSchema):
         description="The role of the message author"
     )
     content: str = Field(..., description="The content of the message")
+    type: Optional[MessageType] = Field(
+        None,
+        description="Optional message type for user content: 1=text, 2=image, 3=file",
+        exclude=True,
+    )
     name: Optional[str] = Field(None, description="The name of the author of this message")
 
 

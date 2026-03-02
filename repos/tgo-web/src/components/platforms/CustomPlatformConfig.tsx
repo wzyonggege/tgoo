@@ -357,6 +357,7 @@ const CustomPlatformConfig: React.FC<Props> = ({ platform }) => {
                 <p className="font-medium text-gray-800 dark:text-gray-100 mb-1">{t('platforms.custom.integration.requiredParams', '必需参数')}</p>
                 <ul className="list-disc list-inside text-xs text-gray-600 dark:text-gray-400 space-y-1">
                   <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">messages</code>: {t('platforms.custom.integration.messagesDesc', '对话消息数组，格式与 OpenAI ChatGPT API 兼容')}</li>
+                  <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">messages[].type</code>: {t('platforms.custom.integration.messageTypeDesc', '消息类型（可选）：1=文本，2=图片，3=文件')}</li>
                   <li><code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded font-mono dark:text-gray-300">user</code>: {t('platforms.custom.integration.userDesc', '第三方平台的用户唯一标识（必需）')}</li>
                 </ul>
               </div>
@@ -370,7 +371,7 @@ X-Platform-API-Key: ${apiKey || '{your_api_key}'}
 Content-Type: application/json
 
 {
-  "messages": [{"role": "user", "content": "你好"}],
+  "messages": [{"role": "user", "type": 1, "content": "你好"}],
   "user": "third_party_user_123",
   "stream": false
 }`}
@@ -465,6 +466,5 @@ Content-Type: application/json
 };
 
 export default CustomPlatformConfig;
-
 
 

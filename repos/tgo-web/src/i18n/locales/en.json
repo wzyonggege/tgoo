@@ -3400,6 +3400,7 @@
         "authDesc": "Add the platform API key in the request header:",
         "requiredParams": "Required Parameters",
         "messagesDesc": "Array of conversation messages, compatible with OpenAI ChatGPT API format",
+        "messageTypeDesc": "Optional message type: 1=text, 2=image, 3=file",
         "userDesc": "Unique identifier of the third-party platform user (required)",
         "optionalFeatures": "Optional Features",
         "visitorRegisterDesc": "If you need to pass detailed user information (name, avatar, etc.), you can first call the visitor registration API:",
