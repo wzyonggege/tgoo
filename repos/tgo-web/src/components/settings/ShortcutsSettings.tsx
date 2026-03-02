@@ -35,6 +35,7 @@ const ShortcutsSettings: React.FC = () => {
   const [search, setSearch] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [loading, setLoading] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState<boolean>(false);
   const [form, setForm] = useState<QuickReplyFormState>(EMPTY_FORM);
 
@@ -47,13 +48,15 @@ const ShortcutsSettings: React.FC = () => {
         offset: 0,
       });
       setItems(response.data);
+      setLoadError(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.shortcuts.error.load', '加载快捷回复失败');
-      showError(t('common.error', '错误'), message);
+      const message = error instanceof Error ? error.message : 'Failed to load quick replies';
+      setItems([]);
+      setLoadError(message);
     } finally {
       setLoading(false);
     }
-  }, [showError, t]);
+  }, []);
 
   useEffect(() => {
     void loadQuickReplies();
@@ -181,6 +184,10 @@ const ShortcutsSettings: React.FC = () => {
           <div className="overflow-y-auto flex-1 space-y-2 pr-1">
             {loading ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">{t('common.loading', '加载中...')}</p>
+            ) : loadError ? (
+              <p className="text-sm text-red-500 dark:text-red-400">
+                {t('settings.shortcuts.error.load', '加载快捷回复失败')}: {loadError}
+              </p>
             ) : filteredItems.length === 0 ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">{t('settings.shortcuts.empty', '暂无快捷回复')}</p>
             ) : (
