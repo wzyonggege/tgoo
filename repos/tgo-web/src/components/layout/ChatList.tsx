@@ -199,7 +199,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       console.error('📋 ChatList: Failed to fetch unassigned count:', error);
     }
   }, []);
-  
+
   // 初始化时获取一次，并监听 queue.updated 事件
   useEffect(() => {
     // 立即获取一次
@@ -565,6 +565,96 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       setIsLoadingMoreRecent(false);
     }
   }, [isLoadingMoreRecent, hasMoreRecent, recentVisitors.length]);
+
+  // Refresh the currently active tab data (used by polling and realtime fallback)
+  const refreshActiveTabData = useCallback(async () => {
+    switch (activeTab) {
+      case 'mine':
+        loadedTabsRef.current.delete('mine');
+        await fetchMyConversations(true);
+        break;
+      case 'unassigned':
+        await Promise.all([fetchUnassignedConversations(), fetchUnassignedCount()]);
+        break;
+      case 'all':
+        await fetchAllConversations();
+        break;
+      case 'manual':
+        await fetchManualConversations();
+        break;
+      case 'recent':
+        await fetchRecentVisitors();
+        break;
+      default:
+        break;
+    }
+  }, [
+    activeTab,
+    fetchAllConversations,
+    fetchManualConversations,
+    fetchMyConversations,
+    fetchRecentVisitors,
+    fetchUnassignedConversations,
+    fetchUnassignedCount,
+  ]);
+
+  // Realtime fallback: when messages arrive, refresh non-"mine" tabs from API
+  // so list data is still fresh even if only partial local state is updated.
+  useEffect(() => {
+    if (activeTab === 'mine') return;
+
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+      refreshTimer = window.setTimeout(() => {
+        void refreshActiveTabData();
+      }, 300);
+    };
+
+    const unsubscribeMessage = wukongimWebSocketService.onMessage(() => {
+      scheduleRefresh();
+    });
+
+    return () => {
+      unsubscribeMessage();
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+    };
+  }, [activeTab, refreshActiveTabData]);
+
+  // Fallback polling: if WebSocket is disconnected, periodically refresh active tab.
+  useEffect(() => {
+    if (isConnected) return;
+
+    const poll = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void refreshActiveTabData();
+    };
+
+    poll();
+    const interval = window.setInterval(poll, 8000);
+    return () => window.clearInterval(interval);
+  }, [isConnected, refreshActiveTabData]);
+
+  // Refresh once when window regains focus/visibility (covers temporary disconnects).
+  useEffect(() => {
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void refreshActiveTabData();
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [refreshActiveTabData]);
   
   // 根据当前 tab 获取对应数据（组件挂载时和 tab 切换时）
   // 注意：'mine' tab 的请求由标签筛选 effect 统一处理，这里不再单独调用

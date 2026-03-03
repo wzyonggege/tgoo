@@ -100,6 +100,24 @@ const ChatWindow: React.FC<ChatWindowProps> = React.memo(({ activeChat, onSendMe
   // Use WebSocket directly
   const { sendMessage: sendWsMessage, isConnected } = useWuKongIMWebSocket();
 
+  // Fallback polling for incoming messages when WebSocket is unavailable.
+  useEffect(() => {
+    if (!isWuKongIMChat || !channelId || typeof channelType !== 'number') return;
+    if (isConnected) return;
+
+    const pollNewMessages = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void loadNewerHistory(channelId, channelType);
+    };
+
+    pollNewMessages();
+    const interval = window.setInterval(pollNewMessages, 5000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [channelId, channelType, isConnected, isWuKongIMChat, loadNewerHistory]);
+
   // Resolve platform type from channel info
   const channelInfo = useChannelStore(state =>
     channelId && typeof channelType === 'number'
