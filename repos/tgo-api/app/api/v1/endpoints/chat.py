@@ -67,6 +67,51 @@ from app.utils.encoding import build_visitor_channel_id, parse_visitor_channel_i
 router = APIRouter()
 
 
+async def _send_custom_ai_reply_to_platform(
+    *,
+    platform: Platform,
+    channel_id: str,
+    channel_type: int,
+    content: str,
+) -> None:
+    """Forward AI text reply to custom platform callback via platform service."""
+    if (platform.type or "").lower() != "custom":
+        return
+    if not platform.api_key:
+        logger.warning("Skip custom AI callback: missing platform api_key", extra={"platform_id": str(platform.id)})
+        return
+    text = (content or "").strip()
+    if not text:
+        return
+
+    target_url = f"{settings.PLATFORM_SERVICE_URL.rstrip('/')}/v1/messages/send"
+    outbound_payload: Dict[str, Any] = {
+        "platform_api_key": platform.api_key,
+        "from_uid": "ai-assistant",
+        "channel_id": channel_id,
+        "channel_type": channel_type,
+        "payload": {
+            "type": 1,
+            "content": text,
+        },
+        "client_msg_no": f"ai_{uuid4().hex}",
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if settings.PLATFORM_SERVICE_API_KEY:
+        headers["Authorization"] = f"Bearer {settings.PLATFORM_SERVICE_API_KEY}"
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.PLATFORM_SERVICE_TIMEOUT) as client:
+            resp = await client.post(target_url, json=outbound_payload, headers=headers)
+            resp.raise_for_status()
+    except Exception as exc:
+        logger.warning(
+            "Custom AI callback forwarding failed",
+            extra={"platform_id": str(platform.id), "channel_id": channel_id, "error": str(exc)},
+        )
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
@@ -521,6 +566,13 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=result.get("error", "AI processing failed")
             )
+
+        await _send_custom_ai_reply_to_platform(
+            platform=platform,
+            channel_id=channel_id_enc,
+            channel_type=channel_type,
+            content=result["content"],
+        )
             
         return {
             "success": True,
@@ -530,6 +582,7 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
 
     # 10) Streaming mode: stream response to client
     async def ai_event_generator() -> Any:
+        full_content = ""
         async for event_payload in chat_service.process_ai_stream_to_wukongim(
             project_id=str(project.id),
             user_id=str(visitor.id),
@@ -545,6 +598,19 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
             agent_ids=platform_agent_ids,
             ai_config=ai_config,
         ):
+            event_type = event_payload.get("event_type")
+            data = event_payload.get("data") or {}
+            if event_type == "team_run_content":
+                chunk = data.get("content")
+                if chunk:
+                    full_content += str(chunk)
+            if event_type in {"team_run_completed", "workflow_completed"}:
+                await _send_custom_ai_reply_to_platform(
+                    platform=platform,
+                    channel_id=channel_id_enc,
+                    channel_type=channel_type,
+                    content=full_content,
+                )
             yield chat_service.sse_format(event_payload)
 
     return StreamingResponse(ai_event_generator(), media_type="text/event-stream")
@@ -1081,6 +1147,7 @@ async def chat_completion_openai_compatible(
     # 10) Handle streaming vs non-streaming response
     if req.stream:
         async def openai_stream_generator():
+            full_content = ""
             try:
                 async for event_payload in chat_service.process_ai_stream_to_wukongim(
                     project_id=str(project.id),
@@ -1102,6 +1169,7 @@ async def chat_completion_openai_compatible(
                     if event_type == "team_run_content":
                         chunk_text = data.get("content")
                         if chunk_text:
+                            full_content += str(chunk_text)
                             chunk = OpenAIChatCompletionChunk(
                                 id=completion_id,
                                 created=created_timestamp,
@@ -1116,6 +1184,12 @@ async def chat_completion_openai_compatible(
                             )
                             yield f"data: {chunk.model_dump_json()}\n\n"
                     elif event_type in ("workflow_completed", "team_run_completed"):
+                        await _send_custom_ai_reply_to_platform(
+                            platform=platform,
+                            channel_id=channel_id_enc,
+                            channel_type=channel_type,
+                            content=full_content,
+                        )
                         final_chunk = OpenAIChatCompletionChunk(
                             id=completion_id,
                             created=created_timestamp,
@@ -1166,6 +1240,13 @@ async def chat_completion_openai_compatible(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=result.get("error", "AI processing failed")
         )
+
+    await _send_custom_ai_reply_to_platform(
+        platform=platform,
+        channel_id=channel_id_enc,
+        channel_type=channel_type,
+        content=result["content"],
+    )
 
     # 12) Estimate token usage and build response
     prompt_tokens, completion_tokens, total_tokens = chat_service.estimate_token_usage(
