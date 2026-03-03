@@ -180,6 +180,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   
   // Track which tabs have been loaded (to prevent duplicate requests on mount)
   const loadedTabsRef = useRef<Set<ChatTabType>>(new Set());
+  const refreshInFlightRef = useRef(false);
   
   // Scroll container ref for infinite scroll
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -568,25 +569,31 @@ const ChatListComponent: React.FC<ChatListProps> = ({
 
   // Refresh the currently active tab data (used by polling and realtime fallback)
   const refreshActiveTabData = useCallback(async () => {
-    switch (activeTab) {
-      case 'mine':
-        loadedTabsRef.current.delete('mine');
-        await fetchMyConversations(true);
-        break;
-      case 'unassigned':
-        await Promise.all([fetchUnassignedConversations(), fetchUnassignedCount()]);
-        break;
-      case 'all':
-        await fetchAllConversations();
-        break;
-      case 'manual':
-        await fetchManualConversations();
-        break;
-      case 'recent':
-        await fetchRecentVisitors();
-        break;
-      default:
-        break;
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    try {
+      switch (activeTab) {
+        case 'mine':
+          loadedTabsRef.current.delete('mine');
+          await fetchMyConversations(true);
+          break;
+        case 'unassigned':
+          await Promise.all([fetchUnassignedConversations(), fetchUnassignedCount()]);
+          break;
+        case 'all':
+          await fetchAllConversations();
+          break;
+        case 'manual':
+          await fetchManualConversations();
+          break;
+        case 'recent':
+          await fetchRecentVisitors();
+          break;
+        default:
+          break;
+      }
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, [
     activeTab,
@@ -598,11 +605,8 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     fetchUnassignedCount,
   ]);
 
-  // Realtime fallback: when messages arrive, refresh non-"mine" tabs from API
-  // so list data is still fresh even if only partial local state is updated.
+  // Realtime fallback: refresh list data when key messages arrive.
   useEffect(() => {
-    if (activeTab === 'mine') return;
-
     let refreshTimer: number | null = null;
     const scheduleRefresh = () => {
       if (typeof document !== 'undefined' && document.hidden) return;
@@ -614,7 +618,11 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       }, 300);
     };
 
-    const unsubscribeMessage = wukongimWebSocketService.onMessage(() => {
+    const unsubscribeMessage = wukongimWebSocketService.onMessage((message) => {
+      // "我的" tab avoids refreshing on every outgoing/streaming message.
+      if (activeTab === 'mine' && message.type !== 'visitor' && message.type !== 'system') {
+        return;
+      }
       scheduleRefresh();
     });
 
@@ -626,17 +634,24 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     };
   }, [activeTab, refreshActiveTabData]);
 
-  // Fallback polling: if WebSocket is disconnected, periodically refresh active tab.
+  // Queue updates usually indicate assignment/waiting-list changes; refresh active tab immediately.
   useEffect(() => {
-    if (isConnected) return;
+    const unsubscribeQueue = wukongimWebSocketService.onQueueUpdated(() => {
+      void refreshActiveTabData();
+    });
+    return () => unsubscribeQueue();
+  }, [refreshActiveTabData]);
 
+  // Safety-net polling: periodically refresh active tab to cover missed websocket events.
+  useEffect(() => {
     const poll = () => {
       if (typeof document !== 'undefined' && document.hidden) return;
       void refreshActiveTabData();
     };
 
     poll();
-    const interval = window.setInterval(poll, 8000);
+    const intervalMs = isConnected ? 5000 : 3000;
+    const interval = window.setInterval(poll, intervalMs);
     return () => window.clearInterval(interval);
   }, [isConnected, refreshActiveTabData]);
 
