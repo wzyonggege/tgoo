@@ -8,7 +8,17 @@ from app.core.config import settings
 from app.db.models import Platform
 from app.domain.entities import NormalizedMessage, ChatCompletionRequest
 from app.domain.ports import TgoApiClient, SSEManager, PlatformAdapter
-from app.domain.services.adapters import SimpleStdoutAdapter, EmailAdapter, WeComAdapter, WeComBotAdapter, FeishuBotAdapter, DingTalkBotAdapter, TelegramAdapter, SlackAdapter
+from app.domain.services.adapters import (
+    SimpleStdoutAdapter,
+    EmailAdapter,
+    WeComAdapter,
+    WeComBotAdapter,
+    FeishuBotAdapter,
+    DingTalkBotAdapter,
+    TelegramAdapter,
+    SlackAdapter,
+    CustomPlatformAdapter,
+)
 
 
 def _expected_output_for(ptype: str) -> str | None:
@@ -150,6 +160,34 @@ async def select_adapter_for_target(msg: NormalizedMessage, platform: Platform) 
         if not (bot_token and channel):
             return SimpleStdoutAdapter()
         return SlackAdapter(bot_token=bot_token, channel=channel, thread_ts=thread_ts)
+    if ptype == "custom":
+        cfg = platform.config or {}
+        callback_url = (cfg.get("callback_url") or "").strip()
+        if not callback_url:
+            logging.warning("[DISPATCH] custom platform missing callback_url, fallback to stdout (platform_id=%s)", msg.platform_id)
+            return SimpleStdoutAdapter()
+
+        extra = msg.extra or {}
+        platform_open_id = str(extra.get("platform_open_id") or msg.from_uid or "").strip()
+        if not platform_open_id:
+            logging.warning("[DISPATCH] custom platform missing platform_open_id, fallback to stdout (platform_id=%s)", msg.platform_id)
+            return SimpleStdoutAdapter()
+
+        channel_id = str(extra.get("channel_id") or "").strip() or f"{platform_open_id}-vtr"
+
+        raw_channel_type = extra.get("channel_type")
+        try:
+            channel_type = int(raw_channel_type) if raw_channel_type is not None else 251
+        except (TypeError, ValueError):
+            channel_type = 251
+
+        return CustomPlatformAdapter(
+            callback_url=callback_url,
+            platform_api_key=platform.api_key or msg.platform_api_key,
+            platform_open_id=platform_open_id,
+            channel_id=channel_id,
+            channel_type=channel_type,
+        )
     return SimpleStdoutAdapter()
 
 
@@ -250,4 +288,3 @@ async def process_message(
                 "[DISPATCH] attempt %s failed for platform_id=%s: %s", attempt + 1, msg.platform_id, e, exc_info=True
             )
             await asyncio.sleep(2 ** attempt)
-
