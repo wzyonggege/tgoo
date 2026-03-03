@@ -1151,7 +1151,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   }, [activeTab, isLoadingMore, hasMore, loadMoreUnassignedConversations, loadMoreAllConversations, loadMoreManualConversations, loadMoreRecentVisitors]);
 
   return (
-    <div className="w-72 bg-white/90 dark:bg-gray-800/90 backdrop-blur-lg border-r border-gray-200/60 dark:border-gray-700/60 flex flex-col">
+    <div className="w-full md:w-72 md:shrink-0 bg-white/90 dark:bg-gray-800/90 backdrop-blur-lg border-r border-gray-200/60 dark:border-gray-700/60 flex flex-col min-w-0">
       {/* Header with search */}
       <ChatListHeader
         searchQuery={searchQuery}

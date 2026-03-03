@@ -3,11 +3,11 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import ChatList from '../components/layout/ChatList';
 import ChatWindow from '../components/layout/ChatWindow';
 import VisitorPanel from '../components/layout/VisitorPanel';
-import { useChatStore, chatSelectors } from '@/stores';
+import { useChatStore, chatSelectors, useUIStore } from '@/stores';
 import { useChannelStore } from '@/stores/channelStore';
 import { getChannelKey } from '@/utils/channelUtils';
 import type { ChatTabType } from '@/components/chat/ChatListTabs';
-import type { ChannelVisitorExtra } from '@/types';
+import type { ChannelVisitorExtra, Chat } from '@/types';
 
 /**
  * Chat page component - contains the original chat interface
@@ -56,6 +56,8 @@ const ChatPage: React.FC = () => {
   const chats = useChatStore(state => state.chats);
   const loadHistoricalMessages = useChatStore(state => state.loadHistoricalMessages);
   const clearConversationUnread = useChatStore(state => state.clearConversationUnread);
+  const isMobile = useUIStore(state => state.isMobile);
+  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
   
   // Callback for when a chat is ended - remove from list and select the next chat
   const handleEndChatSuccess = useCallback((endedChannelId: string, endedChannelType: number) => {
@@ -125,10 +127,30 @@ const ChatPage: React.FC = () => {
     hasAttemptedUrlSync.current = false;
   }, [urlChannelType, urlChannelId]);
 
+  // Mobile single-column behavior:
+  // - /chat -> list
+  // - /chat/:type/:id -> detail
+  // - desktop always keeps detail mode
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileView('chat');
+      return;
+    }
+    if (urlChannelType && urlChannelId) {
+      setMobileView('chat');
+      return;
+    }
+    if (!activeChat) {
+      setMobileView('list');
+    }
+  }, [isMobile, urlChannelType, urlChannelId, activeChat]);
+
   // 设置默认活跃聊天（仅当没有 URL 参数时）
   useEffect(() => {
     // If URL has params, don't auto-select first chat
     if (urlChannelType && urlChannelId) return;
+    // On mobile keep list-first flow, avoid auto-entering detail.
+    if (isMobile) return;
     
     if (!activeChat && chats.length > 0) {
       const firstChat = chats[0];
@@ -136,9 +158,9 @@ const ChatPage: React.FC = () => {
       // Update URL for the default chat
       navigate(`/chat/${firstChat.channelType}/${firstChat.channelId}`, { replace: true });
     }
-  }, [activeChat, chats, setActiveChat, urlChannelType, urlChannelId, navigate]);
+  }, [activeChat, chats, setActiveChat, urlChannelType, urlChannelId, navigate, isMobile]);
 
-  const handleChatSelect = (chat: any): void => {
+  const handleChatSelect = (chat: Chat): void => {
     const prev = activeChat;
     
     // Don't clear unread for unassigned tab (no API call)
@@ -183,8 +205,17 @@ const ChatPage: React.FC = () => {
     if (chat.channelId && chat.channelType != null) {
       navigate(`/chat/${chat.channelType}/${chat.channelId}`, { replace: true });
       loadHistoricalMessages(chat.channelId, chat.channelType);
+      if (isMobile) {
+        setMobileView('chat');
+      }
     }
   };
+
+  const handleBackToList = useCallback(() => {
+    if (!isMobile) return;
+    setMobileView('list');
+    navigate('/chat', { replace: true });
+  }, [isMobile, navigate]);
 
 
   // When returning focus to the tab/window, clear unread for the currently open conversation
@@ -213,29 +244,37 @@ const ChatPage: React.FC = () => {
   const isAgentChat = activeChat?.channelId?.endsWith('-agent') ?? false;
   const isTeamChat = activeChat?.channelId?.endsWith('-team') ?? false;
   const isAIChat = isAgentChat || isTeamChat;
+  const showChatList = !isMobile || mobileView === 'list';
+  const showChatWindow = !isMobile || mobileView === 'chat';
 
   return (
     <div className="flex h-full w-full bg-gray-50 dark:bg-gray-900">
       {/* Chat List */}
-      <ChatList
-        activeChat={activeChat ?? undefined}
-        onChatSelect={handleChatSelect}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        refreshTrigger={refreshTrigger}
-        deletedChatChannel={deletedChatChannel}
-      />
+      {showChatList && (
+        <ChatList
+          activeChat={activeChat ?? undefined}
+          onChatSelect={handleChatSelect}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          refreshTrigger={refreshTrigger}
+          deletedChatChannel={deletedChatChannel}
+        />
+      )}
 
       {/* Main Chat Window */}
-      <ChatWindow
-        key={activeChat ? getChannelKey(activeChat.channelId, activeChat.channelType) : 'no-active'}
-        activeChat={activeChat ?? undefined}
-        onAcceptVisitor={handleAcceptVisitor}
-        onEndChatSuccess={handleEndChatSuccess}
-      />
+      {showChatWindow && (
+        <ChatWindow
+          key={activeChat ? getChannelKey(activeChat.channelId, activeChat.channelType) : 'no-active'}
+          activeChat={activeChat ?? undefined}
+          mobileDetailMode={isMobile}
+          onBackToList={handleBackToList}
+          onAcceptVisitor={handleAcceptVisitor}
+          onEndChatSuccess={handleEndChatSuccess}
+        />
+      )}
 
       {/* Visitor Info Panel - 仅在非 AI 会话（非 agent 和非 team）时显示 */}
-      {!isAIChat && <VisitorPanel activeChat={activeChat ?? undefined} />}
+      {!isMobile && !isAIChat && <VisitorPanel activeChat={activeChat ?? undefined} />}
     </div>
   );
 };

@@ -1464,7 +1464,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // If visitor is in queued status, show accept button instead of input area
   if (isQueued && visitorId) {
     return (
-      <footer className="p-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
+      <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
         <div className="flex flex-col items-center justify-center py-6 space-y-3">
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {t('chat.input.accept.hint', '该访客正在等待接入')}
@@ -1494,7 +1494,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // If conversation is closed, don't show input area
   if (isClosed) {
     return (
-      <footer className="p-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
+      <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
         <div className="flex items-center justify-center py-4">
           <p className="text-sm text-gray-400 dark:text-gray-500">
             {t('chat.input.closed', '会话已结束')}
@@ -1511,7 +1511,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   if (isNotMyVisitor) {
     const staffDisplayName = assignedStaffName || t('chat.input.otherAgent', '其他坐席');
     return (
-      <footer className="p-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
+      <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
         <div className="flex items-center justify-center py-4">
           <p className="text-sm text-gray-400 dark:text-gray-500">
             {t('chat.input.notMyVisitor', '该访客已分配给 {{name}}', { name: staffDisplayName })}
@@ -1522,9 +1522,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
   }
 
   return (
-    <footer className="p-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
+    <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
       {quickReplyOpen && (
-        <div className="mb-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 max-h-56 overflow-y-auto">
+        <div className="mb-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 max-h-48 md:max-h-56 overflow-y-auto">
           {quickReplyLoading ? (
             <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
               {t('chat.input.quickReply.loading', '正在加载快捷回复...')}
@@ -1581,7 +1581,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2 md:space-x-3">
           <button
             ref={emojiBtnRef}
             onClick={() => { if (isManualDisabled) return; setShowEmoji(v => !v); }}
@@ -1590,7 +1590,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             aria-label={t('chat.input.emoji.aria', '打开表情选择器')}
             title={isManualDisabled ? t('chat.input.disabled.tooltip', 'AI助手已启用，手动输入已禁用') : t('chat.input.emoji.title', '插入表情')}
           >
-            <Smile className="w-6 h-6" />
+            <Smile className="w-5 h-5 md:w-6 md:h-6" />
           </button>
           <button
             ref={screenshotBtnRef}
@@ -1600,13 +1600,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
             aria-label={t('chat.input.screenshot.aria', '截图粘贴说明')}
             title={isManualDisabled ? t('chat.input.disabled.tooltip', 'AI助手已启用，手动输入已禁用') : t('chat.input.screenshot.title', '截图')}
           >
-            <Scissors className="w-6 h-6" />
+            <Scissors className="w-5 h-5 md:w-6 md:h-6" />
           </button>
           <button onClick={handleClickImageBtn} disabled={isManualDisabled} className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" aria-label={t('chat.input.image.aria', '上传图片')} title={isManualDisabled ? t('chat.input.disabled.tooltip', 'AI助手已启用，手动输入已禁用') : t('chat.input.image.title', '发送图片')}>
-            <ImageIcon className="w-6 h-6" />
+            <ImageIcon className="w-5 h-5 md:w-6 md:h-6" />
           </button>
           <button onClick={handleClickFileBtn} disabled={isManualDisabled} className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" aria-label={t('chat.input.file.aria', '上传文件')} title={isManualDisabled ? t('chat.input.disabled.tooltip', 'AI助手已启用，手动输入已禁用') : t('chat.input.file.title', '发送文件')}>
-            <Folder className="w-6 h-6" />
+            <Folder className="w-5 h-5 md:w-6 md:h-6" />
           </button>
         </div>
 
@@ -1791,7 +1791,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       {/* Send controls */}
       <div className="flex justify-end mt-1">
-        <button className="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 mr-2" title={isManualDisabled ? t('chat.input.disabled.tooltip', 'AI助手已启用，手动输入已禁用') : undefined}>
+        <button className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 mr-2" title={isManualDisabled ? t('chat.input.disabled.tooltip', 'AI助手已启用，手动输入已禁用') : undefined}>
           {t('chat.input.shortcuts.sendWithHint', 'Enter 发送 • {{hint}}', { hint: newlineHint })}
         </button>
         {isStreamingInProgress ? (

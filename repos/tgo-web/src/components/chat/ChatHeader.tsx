@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { Chat, PlatformType, ChannelVisitorExtra, VisitorServiceStatus } from '@/types';
 import { useTranslation } from 'react-i18next';
-import { Bot, LogOut, Loader2, ArrowRightLeft, ChevronDown, User, RotateCcw } from 'lucide-react';
+import { Bot, LogOut, Loader2, ArrowRightLeft, ChevronDown, ChevronLeft, User, RotateCcw } from 'lucide-react';
 import { TbBrain } from 'react-icons/tb';
 
 import { getPlatformIconComponent, getPlatformLabel, toPlatformType, getPlatformColor } from '@/utils/platformUtils';
@@ -21,6 +21,10 @@ import { chatMessagesApiService } from '@/services/chatMessagesApi';
 export interface ChatHeaderProps {
   /** The active chat to display in the header */
   activeChat: Chat;
+  /** Back to list callback for mobile detail view */
+  onBackToList?: () => void;
+  /** Whether to show mobile back button */
+  showBackButton?: boolean;
   /** Callback when chat is ended successfully (with channel info) */
   onEndChatSuccess?: (channelId: string, channelType: number) => void;
 }
@@ -29,7 +33,7 @@ export interface ChatHeaderProps {
  * Chat header component displaying visitor name and platform icon
  * Memoized to prevent unnecessary re-renders
  */
-const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onEndChatSuccess }) => {
+const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onBackToList, showBackButton = false, onEndChatSuccess }) => {
   const { t } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [isClosing, setIsClosing] = useState(false);
@@ -211,10 +215,21 @@ const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onEndCha
   }, [showTransferMenu]);
   
   return (
-    <header className="px-6 py-3 border-b border-gray-200/80 dark:border-gray-700/80 flex justify-between items-center bg-white/60 dark:bg-gray-800/60 backdrop-blur-lg sticky top-0 z-10">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center">
-          <span>{displayName}</span>
+    <header className="px-3 md:px-6 py-2.5 md:py-3 border-b border-gray-200/80 dark:border-gray-700/80 flex justify-between items-center bg-white/60 dark:bg-gray-800/60 backdrop-blur-lg sticky top-0 z-10">
+      <div className="flex min-w-0 items-center gap-2">
+        {showBackButton && onBackToList && (
+          <button
+            type="button"
+            onClick={onBackToList}
+            className="md:hidden inline-flex items-center justify-center rounded-md p-1 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            aria-label={t('chat.header.backToList', '返回会话列表')}
+            title={t('chat.header.backToList', '返回会话列表')}
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        )}
+        <h2 className="text-base md:text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center min-w-0">
+          <span className="truncate">{displayName}</span>
           {isAgentChat ? (
             <span title={t('chat.header.agentTooltip', 'AI员工会话')}>
               <Bot className="w-4 h-4 inline-block ml-1.5 -mt-0.5 text-purple-500 dark:text-purple-400" />
@@ -240,7 +255,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onEndCha
       </div>
       {/* 操作按钮 - 只对访客会话显示 */}
       {showEndChatButton && (
-        <div className="flex items-center gap-1">
+        <div className="ml-2 flex items-center gap-1 shrink-0">
           {/* 转接按钮 */}
           <div className="relative" ref={transferMenuRef}>
             <button
@@ -305,7 +320,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onEndCha
       )}
       {/* 操作按钮 - AI 会话显示清除记忆 */}
       {isAIChat && (
-        <div className="flex items-center gap-1">
+        <div className="ml-2 flex items-center gap-1 shrink-0">
           <button
             onClick={handleClearMemory}
             disabled={isClearingMemory}

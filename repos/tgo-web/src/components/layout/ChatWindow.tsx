@@ -24,6 +24,10 @@ import { WsSendError } from '@/services/wukongimWebSocket';
 export interface ChatWindowProps {
   /** The currently active chat */
   activeChat?: Chat;
+  /** Whether current view is mobile detail mode */
+  mobileDetailMode?: boolean;
+  /** Callback to return to chat list in mobile detail mode */
+  onBackToList?: () => void;
   /** Callback when a message is sent */
   onSendMessage?: (message: string) => void;
   /** Callback when a visitor is accepted from the waiting queue */
@@ -45,7 +49,14 @@ export interface ChatWindowProps {
  * @param activeChat - The currently active chat
  * @param onSendMessage - Callback when a message is sent
  */
-const ChatWindow: React.FC<ChatWindowProps> = React.memo(({ activeChat, onSendMessage, onAcceptVisitor, onEndChatSuccess }) => {
+const ChatWindow: React.FC<ChatWindowProps> = React.memo(({
+  activeChat,
+  mobileDetailMode = false,
+  onBackToList,
+  onSendMessage,
+  onAcceptVisitor,
+  onEndChatSuccess
+}) => {
   const { t } = useTranslation();
   // Get channel info for WuKongIM integration (flattened on Chat)
   const channelId = activeChat?.channelId;
@@ -344,9 +355,14 @@ const ChatWindow: React.FC<ChatWindowProps> = React.memo(({ activeChat, onSendMe
   }, [channelId, channelType, user, addMessage, updateConversationLastMessage]);
 
   return (
-    <main className="flex-grow flex flex-col bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
+    <main className="flex-grow flex flex-col bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 min-w-0">
       {/* Chat Header */}
-      <ChatHeader activeChat={activeChat} onEndChatSuccess={onEndChatSuccess} />
+      <ChatHeader
+        activeChat={activeChat}
+        showBackButton={mobileDetailMode}
+        onBackToList={onBackToList}
+        onEndChatSuccess={onEndChatSuccess}
+      />
 
       {/* Messages Area */}
       <div className="flex-1 min-h-0 overflow-hidden">
