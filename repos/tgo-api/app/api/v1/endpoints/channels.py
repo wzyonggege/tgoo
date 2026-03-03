@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.database import get_db
 from app.core.security import verify_token, get_user_language, UserLanguage
-from app.models import Staff, Visitor, VisitorTag, VisitorActivity, Platform, VisitorSession, SessionStatus
+from app.models import Staff, Visitor, VisitorTag, VisitorActivity, Platform, PlatformType, VisitorSession, SessionStatus
 from app.schemas.visitor import (
     VisitorResponse,
     VisitorSystemInfoResponse,
@@ -151,6 +151,13 @@ def _build_enriched_visitor_payload(
     )
     populate_visitor_ai_settings(visitor_payload, visitor.platform)
     localize_visitor_response_intent(visitor_payload, accept_language)
+
+    # Include configured platform name for conversation list/channel display.
+    if visitor.platform:
+        if visitor.platform.type == PlatformType.WEBSITE.value:
+            visitor_payload.source_display = visitor.platform.name or "Website"
+        else:
+            visitor_payload.source_display = visitor.platform.name or visitor.platform.type
 
     return visitor_payload
 

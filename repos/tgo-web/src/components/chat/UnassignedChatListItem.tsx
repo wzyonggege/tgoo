@@ -88,6 +88,12 @@ export const UnassignedChatListItem: React.FC<UnassignedChatListItemProps> = Rea
     return { visitorStatus: chat.visitorStatus, lastSeenMinutes: chat.lastSeenMinutes };
   }, [visitorExtra?.is_online, visitorExtra?.last_offline_time, chat.visitorStatus, chat.lastSeenMinutes, parseMinutesAgo]);
 
+  const channelSourceLabel = useMemo(() => {
+    const source = visitorExtra?.source_display?.trim();
+    if (source) return source;
+    return '';
+  }, [visitorExtra?.source_display]);
+
   // Handle click - no unread clearing for unassigned chats
   const handleClick = useCallback(() => { 
     onClick(chat); 
@@ -184,6 +190,16 @@ export const UnassignedChatListItem: React.FC<UnassignedChatListItemProps> = Rea
                 : undefined;
               return fromExtra ?? toPlatformType(chat.platform);
             })()} />
+            {channelSourceLabel && (
+              <span
+                title={channelSourceLabel}
+                className={`ml-1 max-w-[120px] truncate text-[10px] font-normal ${
+                  isActive ? 'text-blue-100/80' : 'text-gray-400 dark:text-gray-500'
+                }`}
+              >
+                {channelSourceLabel}
+              </span>
+            )}
           </h3>
           {/* Waiting time badge - prominently displayed */}
           <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs flex-shrink-0 ml-2 ${urgencyStyles.badge}`}>

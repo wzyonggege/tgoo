@@ -58,6 +58,12 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
     return { visitorStatus: chat.visitorStatus, lastSeenMinutes: chat.lastSeenMinutes };
   }, [visitorExtra?.is_online, visitorExtra?.last_offline_time, chat.visitorStatus, chat.lastSeenMinutes]);
 
+  const channelSourceLabel = useMemo(() => {
+    const source = visitorExtra?.source_display?.trim();
+    if (source) return source;
+    return '';
+  }, [visitorExtra?.source_display]);
+
   const handleClick = useCallback(() => { onClick(chat); }, [onClick, chat]);
 
   // Unread fade-out animation when transitioning from >0 to 0
@@ -105,7 +111,19 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
             ) : isTeamChat ? (
               <TbBrain className={`w-3.5 h-3.5 ml-1 flex-shrink-0 ${isActive ? 'text-blue-100' : 'text-green-500 dark:text-green-400'}`} />
             ) : (
-              <ChatPlatformIcon platformType={(extra as any)?.platform_type ?? toPlatformType(chat.platform)} />
+              <>
+                <ChatPlatformIcon platformType={(extra as any)?.platform_type ?? toPlatformType(chat.platform)} />
+                {channelSourceLabel && (
+                  <span
+                    title={channelSourceLabel}
+                    className={`ml-1 max-w-[120px] truncate text-[10px] font-normal ${
+                      isActive ? 'text-blue-100/80' : 'text-gray-400 dark:text-gray-500'
+                    }`}
+                  >
+                    {channelSourceLabel}
+                  </span>
+                )}
+              </>
             )}
           </h3>
           <span className={`text-xs flex-shrink-0 ml-2 ${isActive ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>
@@ -131,4 +149,3 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
 });
 
 ChatListItem.displayName = 'ChatListItem';
-

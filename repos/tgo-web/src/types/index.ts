@@ -1053,6 +1053,7 @@ export interface ChannelVisitorExtra {
   id: string;
   platform_id: string;
   platform_type: PlatformType;
+  source_display?: string;
   platform_open_id: string;
   name?: string;
   nickname?: string;
