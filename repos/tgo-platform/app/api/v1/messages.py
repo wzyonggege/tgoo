@@ -114,8 +114,10 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                     request_id=request_id
                 )
 
-            # Extract platform_api_key from config (try both field names)
-            platform_api_key_value = cfg.get("platform_api_key") or cfg.get("api_key") or ""
+            # Use the validated platform API key as the canonical callback identifier.
+            # We already loaded `platform` by req_body.platform_api_key above, so this
+            # value is guaranteed to match the actual platform row.
+            platform_api_key_value = platform.api_key or req_body.platform_api_key
 
             # Extract platform_open_id from request body
             platform_open_id = req_body.payload.get("platform_open_id") if isinstance(req_body.payload, dict) else None
