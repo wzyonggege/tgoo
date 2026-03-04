@@ -91,23 +91,85 @@ graph TB
 ## 🚀 Quick Start
 
 ### System Requirements
-- **CPU**: >= 2 Core
+- **CPU**: >= 2 cores
 - **RAM**: >= 4 GiB
 - **OS**: macOS / Linux / WSL2
+- **Container runtime**: Docker + Docker Compose (plugin)
 
-### One-Click Deployment
-
-Run the following command on your server to check requirements, clone the repository, and start the services:
+### Option A: One-Click Deployment (Recommended)
 
 ```bash
 REF=latest curl -fsSL https://raw.githubusercontent.com/tgoai/tgo/main/bootstrap.sh | bash
 ```
 
-> **For users in China** (using Gitee and Aliyun mirrors):
+> **For users in Mainland China** (Gitee + mirror acceleration):
 > ```bash
 > REF=latest curl -fsSL https://gitee.com/tgoai/tgo/raw/main/bootstrap_cn.sh | bash
 > ```
 
+### Option B: Start from Source Checkout
+
+```bash
+git clone https://github.com/tgoai/tgo.git
+cd tgo
+cp .env.example .env
+# Fill FASTGPT_API_KEY and other required settings
+./tgo.sh install
+./tgo.sh doctor
+```
+
+Default endpoints (adjust to your host/ports/domains):
+- Admin console: `http://<host>/`
+- API docs: `http://<host>/api/v1/docs`
+- Widget demo: `http://<host>/widget/demo.html`
+
+## 🔧 Common Configuration
+
+### 1) External AI (FastGPT / OpenAI-compatible)
+
+Key `.env` entries:
+
+```bash
+AI_PROVIDER_MODE=fastgpt
+FASTGPT_API_BASE=https://api.fastgpt.cloud
+FASTGPT_API_KEY=your_key
+FASTGPT_MODEL=gpt-4o-mini
+FASTGPT_COMPLETIONS_PATH=/api/openapi/v1/chat/completions
+```
+
+### 2) File Storage (local / MinIO / OSS / S3)
+
+```bash
+STORAGE_TYPE=local      # local | oss | minio | s3
+```
+
+- `oss`: configure `OSS_*`
+- `minio`: configure `MINIO_*`
+- `s3`: configure `AWS_S3_*`
+
+> `s3` supports `AWS_S3_ENDPOINT_URL` and `AWS_S3_PUBLIC_BASE_URL` for S3-compatible vendors and custom CDN domains.
+
+## 🛠️ Operations Cheat Sheet
+
+| Command | Purpose |
+| :--- | :--- |
+| `./tgo.sh install [--cn]` | Initialize and start the full stack |
+| `./tgo.sh up [--cn]` | Start services without re-initialization |
+| `./tgo.sh down [--volumes]` | Stop services (optionally remove volumes) |
+| `./tgo.sh doctor` | Health check |
+| `./tgo.sh build api/platform/web/widget/all` | Rebuild selected service images |
+| `./tgo.sh upgrade [--cn]` | Upgrade to latest version |
+| `./tgo.sh config show` | Show current domain/SSL/IP-allowlist config |
+
+## 🔐 Domain, SSL, and IP Allowlist Notes
+
+- Prefer `./tgo.sh config ...` for ingress settings; it regenerates Nginx config files.
+- If 80/443 are already occupied on your host, set alternate ports first:
+  - `./tgo.sh config http_port 8080`
+  - `./tgo.sh config https_port 8443`
+- If you terminate TLS on an external reverse proxy, keep TGO in `ssl_mode none` and proxy `/`, `/api`, `/widget`, and WebSocket traffic to TGO.
+- For strict access control, enforce allowlists at your outermost gateway first; if you also use `./tgo.sh config ip_allow ...`, verify traffic is not bypassing that Nginx layer.
+
 ---
 
-For more details, please visit the [Documentation](https://tgo.ai).
+For more details, visit the [Documentation](https://tgo.ai).

@@ -88,26 +88,88 @@ graph TB
 |:---:|:---:|
 | **首页** <br> <img src="resources/screenshot/zh/home_dark.png" width="100%"> | **会话工作台** <br> <img src="resources/screenshot/zh/agent_dark.png" width="100%"> |
 
-## 🚀 快速开始 (Quick Start)
+## 🚀 快速开始
 
 ### 机器配置要求
 - **CPU**: >= 2 Core
 - **RAM**: >= 4 GiB
 - **OS**: macOS / Linux / WSL2
+- **Docker**: Docker + Docker Compose (plugin)
 
-### 一键部署
-
-在服务器上运行以下命令即可完成检查、克隆并启动服务：
+### 方案 A：一键部署（推荐）
 
 ```bash
 REF=latest curl -fsSL https://raw.githubusercontent.com/tgoai/tgo/main/bootstrap.sh | bash
 ```
 
-> **中国境内用户推荐使用国内加速版**（使用 Gitee 和阿里云镜像）：
+> **中国境内用户推荐使用国内加速版**（Gitee + 国内镜像）：
 > ```bash
 > REF=latest curl -fsSL https://gitee.com/tgoai/tgo/raw/main/bootstrap_cn.sh | bash
 > ```
 
+### 方案 B：源码目录直接启动
+
+```bash
+git clone https://github.com/tgoai/tgo.git
+cd tgo
+cp .env.example .env
+# 填写 FASTGPT_API_KEY 等关键配置
+./tgo.sh install
+./tgo.sh doctor
+```
+
+默认访问入口（按你的端口/域名调整）：
+- 管理后台：`http://<host>/`
+- API 文档：`http://<host>/api/v1/docs`
+- Widget 示例：`http://<host>/widget/demo.html`
+
+## 🔧 常见配置
+
+### 1) 外接 AI（FastGPT/OpenAI 兼容）
+
+`.env` 关键项：
+
+```bash
+AI_PROVIDER_MODE=fastgpt
+FASTGPT_API_BASE=https://api.fastgpt.cloud
+FASTGPT_API_KEY=your_key
+FASTGPT_MODEL=gpt-4o-mini
+FASTGPT_COMPLETIONS_PATH=/api/openapi/v1/chat/completions
+```
+
+### 2) 文件存储（本地 / MinIO / OSS / S3）
+
+```bash
+STORAGE_TYPE=local      # local | oss | minio | s3
+```
+
+- `oss`：配置 `OSS_*`
+- `minio`：配置 `MINIO_*`
+- `s3`：配置 `AWS_S3_*`
+
+> 提示：`s3` 支持自定义 `AWS_S3_ENDPOINT_URL` 与 `AWS_S3_PUBLIC_BASE_URL`，可兼容多种 S3 协议存储。
+
+## 🛠️ 运维命令速查
+
+| 命令 | 说明 |
+| :--- | :--- |
+| `./tgo.sh install [--cn]` | 初始化并启动全套服务 |
+| `./tgo.sh up [--cn]` | 启动服务（不重新初始化） |
+| `./tgo.sh down [--volumes]` | 停止服务（可选删除卷） |
+| `./tgo.sh doctor` | 健康检查 |
+| `./tgo.sh build api/platform/web/widget/all` | 按服务重建镜像 |
+| `./tgo.sh upgrade [--cn]` | 升级到最新版本 |
+| `./tgo.sh config show` | 查看域名/SSL/白名单当前配置 |
+
+## 🔐 域名、SSL 与白名单建议
+
+- 使用内置配置命令管理入口：`./tgo.sh config ...`（会重生成 Nginx 配置）。
+- 若服务器 80/443 已被占用，可先设置：
+  - `./tgo.sh config http_port 8080`
+  - `./tgo.sh config https_port 8443`
+- 如果你使用外部 Nginx/网关统一接管证书，建议将 TGO 内部设为 `ssl_mode none`，由外层反代 `/`、`/api`、`/widget`、WebSocket 到 TGO。
+- IP 白名单优先放在最外层网关统一控制；若用 `./tgo.sh config ip_allow ...`，请确认反向代理链路不会绕过该层 Nginx。
+
 ---
 
-更多详细信息请参阅 [文档](https://tgo.ai)。
+更多信息请参阅 [文档](https://tgo.ai)。
