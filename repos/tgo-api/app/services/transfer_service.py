@@ -26,6 +26,7 @@ from app.models import (
     SessionStatus,
     Staff,
     StaffRole,
+    StaffStatus,
     ChannelMember,
 )
 from app.services.wukongim_client import wukongim_client
@@ -871,6 +872,7 @@ async def _get_available_staff_candidates(
         Staff.project_id == project_id,
         Staff.deleted_at.is_(None),
         Staff.role == StaffRole.USER.value,
+        Staff.status == StaffStatus.ONLINE.value,
         Staff.is_active == True,  # noqa: E712 - SQLAlchemy requires == for boolean
         Staff.service_paused == False,  # noqa: E712 - SQLAlchemy requires == for boolean
     )
