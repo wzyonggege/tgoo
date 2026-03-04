@@ -6,10 +6,6 @@
   <a href="./README.md">English</a> | <a href="./README_CN.md">简体中文</a>
 </p>
 
-<p align="center">
-  <a href="https://tgo.ai">Website</a> | <a href="https://tgo.ai">Documentation</a>
-</p>
-
 ## TGO Introduction
 
 TGO is an open-source, channel-first customer service platform. The project now focuses on messaging, routing, and agent experience while delegating AI responses to external providers such as [FastGPT](https://fastgpt.run). This keeps the codebase lean—only the core CRM services (API, Platform relay, Admin Web, Widget, WuKongIM, Postgres, Redis, Nginx) stay in the default deployment—and you decide which AI provider to plug in.
@@ -96,22 +92,11 @@ graph TB
 - **OS**: macOS / Linux / WSL2
 - **Container runtime**: Docker + Docker Compose (plugin)
 
-### Option A: One-Click Deployment (Recommended)
+### Start from Source Checkout
 
 ```bash
-REF=latest curl -fsSL https://raw.githubusercontent.com/tgoai/tgo/main/bootstrap.sh | bash
-```
-
-> **For users in Mainland China** (Gitee + mirror acceleration):
-> ```bash
-> REF=latest curl -fsSL https://gitee.com/tgoai/tgo/raw/main/bootstrap_cn.sh | bash
-> ```
-
-### Option B: Start from Source Checkout
-
-```bash
-git clone https://github.com/tgoai/tgo.git
-cd tgo
+git clone https://github.com/wzyonggege/tgoo.git
+cd tgoo
 cp .env.example .env
 # Fill FASTGPT_API_KEY and other required settings
 ./tgo.sh install
@@ -169,7 +154,3 @@ STORAGE_TYPE=local      # local | oss | minio | s3
   - `./tgo.sh config https_port 8443`
 - If you terminate TLS on an external reverse proxy, keep TGO in `ssl_mode none` and proxy `/`, `/api`, `/widget`, and WebSocket traffic to TGO.
 - For strict access control, enforce allowlists at your outermost gateway first; if you also use `./tgo.sh config ip_allow ...`, verify traffic is not bypassing that Nginx layer.
-
----
-
-For more details, visit the [Documentation](https://tgo.ai).

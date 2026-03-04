@@ -6,10 +6,6 @@
   <a href="./README.md">English</a> | <a href="./README_CN.md">简体中文</a>
 </p>
 
-<p align="center">
-  <a href="https://tgo.ai">官网</a> | <a href="https://tgo.ai">文档</a>
-</p>
-
 ## TGO 介绍
 
 TGO 现在聚焦于“客服中台 + 外接 AI”模式：平台内置全渠道会话、客服工作台与悟空 IM 实时通讯，AI 能力统一转接到 [FastGPT](https://fastgpt.run) 等 OpenAI 兼容接口。默认 Docker Compose 仅包含 PostgreSQL、Redis、WuKongIM、tgo-api、tgo-platform、tgo-web、tgo-widget-app 与 Nginx，保持部署极简，而模型供应商由你决定。
@@ -96,22 +92,11 @@ graph TB
 - **OS**: macOS / Linux / WSL2
 - **Docker**: Docker + Docker Compose (plugin)
 
-### 方案 A：一键部署（推荐）
+### 源码目录直接启动
 
 ```bash
-REF=latest curl -fsSL https://raw.githubusercontent.com/tgoai/tgo/main/bootstrap.sh | bash
-```
-
-> **中国境内用户推荐使用国内加速版**（Gitee + 国内镜像）：
-> ```bash
-> REF=latest curl -fsSL https://gitee.com/tgoai/tgo/raw/main/bootstrap_cn.sh | bash
-> ```
-
-### 方案 B：源码目录直接启动
-
-```bash
-git clone https://github.com/tgoai/tgo.git
-cd tgo
+git clone https://github.com/wzyonggege/tgoo.git
+cd tgoo
 cp .env.example .env
 # 填写 FASTGPT_API_KEY 等关键配置
 ./tgo.sh install
@@ -169,7 +154,3 @@ STORAGE_TYPE=local      # local | oss | minio | s3
   - `./tgo.sh config https_port 8443`
 - 如果你使用外部 Nginx/网关统一接管证书，建议将 TGO 内部设为 `ssl_mode none`，由外层反代 `/`、`/api`、`/widget`、WebSocket 到 TGO。
 - IP 白名单优先放在最外层网关统一控制；若用 `./tgo.sh config ip_allow ...`，请确认反向代理链路不会绕过该层 Nginx。
-
----
-
-更多信息请参阅 [文档](https://tgo.ai)。
