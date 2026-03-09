@@ -42,6 +42,10 @@ class PlatformBase(BaseSchema):
         ge=0,
         description="Timeout in seconds before AI takes over when ai_mode=assist. 0 means AI never takes over."
     )
+    ai_reply_id: Optional[str] = Field(
+        default=None,
+        description="Selected AI reply integration ID for this platform"
+    )
 
 
 class PlatformAISettings(BaseSchema):
@@ -49,6 +53,7 @@ class PlatformAISettings(BaseSchema):
     ai_mode: Optional[PlatformAIMode] = Field(None, description="AI mode: auto, assist, or off")
     agent_ids: Optional[List[UUID]] = Field(None, description="List of AI Agent IDs assigned to this platform")
     fallback_to_ai_timeout: Optional[int] = Field(None, description="Timeout in seconds before AI takes over when ai_mode=assist")
+    ai_reply_id: Optional[str] = Field(None, description="Selected AI reply integration ID for this platform")
 
 
 class PlatformCreate(PlatformBase):
@@ -90,6 +95,10 @@ class PlatformUpdate(BaseSchema):
         ge=0,
         description="Timeout in seconds before AI takes over when ai_mode=assist. 0 means AI never takes over."
     )
+    ai_reply_id: Optional[str] = Field(
+        None,
+        description="Selected AI reply integration ID for this platform"
+    )
 
 
 class PlatformInDB(PlatformBase, TimestampMixin, SoftDeleteMixin):
@@ -121,6 +130,7 @@ class PlatformListItemResponse(BaseSchema, TimestampMixin, SoftDeleteMixin):
     agent_ids: Optional[List[UUID]] = Field(None, description="List of AI Agent IDs assigned to this platform")
     ai_mode: Optional[PlatformAIMode] = Field(None, description="AI mode: auto, assist, or off")
     fallback_to_ai_timeout: Optional[int] = Field(None, description="Timeout in seconds before AI takes over when ai_mode=assist")
+    ai_reply_id: Optional[str] = Field(None, description="Selected AI reply integration ID for this platform")
 
     @computed_field  # type: ignore[misc]
     @property

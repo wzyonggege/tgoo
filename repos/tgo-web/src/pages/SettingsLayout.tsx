@@ -14,7 +14,7 @@ const SettingsLayout: React.FC = () => {
     { id: 'notifications', label: t('settings.menu.notifications', '消息通知') },
     { id: 'shortcuts', label: t('settings.menu.shortcuts', '快捷回复') },
     { id: 'staff', label: t('settings.menu.staff', '人工坐席') },
-    { id: 'providers', label: t('settings.menu.providers', '模型提供商') },
+    { id: 'providers', label: t('settings.menu.providers', 'AI回复接入') },
   ];
 
   const iconMap: Record<string, React.ReactNode> = {

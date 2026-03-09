@@ -1,6 +1,10 @@
 """Pydantic models for request/response validation."""
 
 from app.schemas.ai_config import (
+    AIConfigCreateRequest,
+    AIConfigListResponse,
+    AIConfigOptionListResponse,
+    AIConfigOptionResponse,
     AIConfigResponse,
     AIConfigUpdateRequest,
 )
@@ -197,6 +201,10 @@ __all__ = [
     "BulkOperationResponse",
     "SearchParams",
     # AI config schemas
+    "AIConfigCreateRequest",
+    "AIConfigListResponse",
+    "AIConfigOptionListResponse",
+    "AIConfigOptionResponse",
     "AIConfigResponse",
     "AIConfigUpdateRequest",
     # Project schemas

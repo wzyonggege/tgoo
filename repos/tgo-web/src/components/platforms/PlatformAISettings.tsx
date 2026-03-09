@@ -1,32 +1,67 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bot, Clock3, Users } from 'lucide-react';
+import { Bot, Clock3, Loader2, Users } from 'lucide-react';
 import type { Platform, PlatformAIMode } from '@/types';
+import aiConfigApi, { type AIProviderConfigOption } from '@/services/aiConfigApi';
 
 interface PlatformAISettingsProps {
   platform: Platform;
   agentIds: string[];
   aiMode: PlatformAIMode;
   fallbackTimeout: number | null;
+  aiReplyId?: string | null;
   onAgentIdsChange: (agentIds: string[]) => void;
   onAIModeChange: (mode: PlatformAIMode) => void;
   onFallbackTimeoutChange: (timeout: number | null) => void;
+  onAIReplyIdChange?: (aiReplyId: string | null) => void;
   defaultExpanded?: boolean;
 }
 
-/**
- * Placeholder for legacy AI team settings. Since外接 FastGPT 已接管 AI 能力，
- * 这里暂不提供额外配置，仅保留占位，避免大量平台配置页面需要条件渲染。
- */
 const PlatformAISettings: React.FC<PlatformAISettingsProps> = ({
   platform,
   aiMode,
   fallbackTimeout,
+  aiReplyId,
   onAIModeChange,
   onFallbackTimeoutChange,
+  onAIReplyIdChange,
   defaultExpanded = false,
 }) => {
+  const safeOnAIReplyIdChange = onAIReplyIdChange ?? (() => undefined);
   const { t } = useTranslation();
+  const [aiOptions, setAiOptions] = useState<AIProviderConfigOption[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadOptions = async () => {
+      setLoadingOptions(true);
+      try {
+        const options = await aiConfigApi.listConfigOptions();
+        if (!isMounted) return;
+        setAiOptions(options);
+        setLoadError(null);
+      } catch (error) {
+        if (!isMounted) return;
+        const message = error instanceof Error
+          ? error.message
+          : t('platforms.ai.replySelector.loadError', '加载 AI 回复列表失败');
+        setLoadError(message);
+        setAiOptions([]);
+      } finally {
+        if (isMounted) {
+          setLoadingOptions(false);
+        }
+      }
+    };
+
+    void loadOptions();
+    return () => {
+      isMounted = false;
+    };
+  }, [t]);
 
   const options = useMemo(
     () => [
@@ -60,6 +95,15 @@ const PlatformAISettings: React.FC<PlatformAISettingsProps> = ({
   };
 
   const assistTimeout = fallbackTimeout ?? 60;
+  const defaultOption = aiOptions.find((item) => item.is_default) ?? null;
+  const selectedOptionId = aiReplyId ?? defaultOption?.id ?? '';
+  const selectedOptionExists = selectedOptionId ? aiOptions.some((item) => item.id === selectedOptionId) : true;
+
+  useEffect(() => {
+    if (!loadingOptions && aiReplyId && !selectedOptionExists) {
+      safeOnAIReplyIdChange(null);
+    }
+  }, [aiReplyId, loadingOptions, safeOnAIReplyIdChange, selectedOptionExists]);
 
   return (
     <details
@@ -77,6 +121,54 @@ const PlatformAISettings: React.FC<PlatformAISettingsProps> = ({
             { name: platform.name || platform.display_name || '' },
           )}
         </p>
+
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-2">
+          <label className="text-sm font-medium text-gray-800 dark:text-gray-100">
+            {t('platforms.ai.replySelector.label', '回复 AI')}
+          </label>
+          {loadingOptions ? (
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>{t('platforms.ai.replySelector.loading', '加载 AI 回复配置中...')}</span>
+            </div>
+          ) : (
+            <>
+              <select
+                value={selectedOptionExists ? selectedOptionId : ''}
+                onChange={(event) => safeOnAIReplyIdChange(event.target.value || null)}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
+              >
+                <option value="">
+                  {defaultOption
+                    ? t('platforms.ai.replySelector.defaultOption', '系统默认（{{name}}）', { name: defaultOption.name })
+                    : t('platforms.ai.replySelector.emptyDefault', '系统默认')}
+                </option>
+                {aiOptions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}{item.is_default ? ` · ${t('common.default', '默认')}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {t('platforms.ai.replySelector.helper', '为当前渠道指定使用哪一个 AI 回复接入；不选时使用系统默认。')}
+              </p>
+              {!aiOptions.length && (
+                <p className="text-xs text-amber-600 dark:text-amber-300">
+                  {t('platforms.ai.replySelector.empty', '当前还没有可用的 AI 回复接入，请先到设置中新增。')}
+                </p>
+              )}
+              {loadError && (
+                <p className="text-xs text-red-500 dark:text-red-400">{loadError}</p>
+              )}
+              {!selectedOptionExists && aiReplyId && (
+                <p className="text-xs text-amber-600 dark:text-amber-300">
+                  {t('platforms.ai.replySelector.missing', '当前渠道选择的 AI 回复已不存在，保存后将回退为系统默认。')}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
         <div className="grid gap-3 md:grid-cols-3">
           {options.map((option) => {
             const active = option.value === aiMode;

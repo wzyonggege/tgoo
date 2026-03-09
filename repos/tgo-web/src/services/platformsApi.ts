@@ -44,6 +44,7 @@ export interface PlatformResponse {
   agent_ids?: string[] | null; // List of AI Agent IDs assigned to this platform
   ai_mode?: PlatformAIMode | null; // AI mode: auto, assist, or off
   fallback_to_ai_timeout?: number | null; // Timeout in seconds before AI takes over (assist mode)
+  ai_reply_id?: string | null;
 }
 // OpenAPI: PlatformUpdate (partial)
 export interface PlatformUpdateRequest {
@@ -55,6 +56,7 @@ export interface PlatformUpdateRequest {
   agent_ids?: string[] | null;
   ai_mode?: PlatformAIMode | null;
   fallback_to_ai_timeout?: number | null;
+  ai_reply_id?: string | null;
 }
 
 

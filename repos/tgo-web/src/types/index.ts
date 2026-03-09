@@ -23,6 +23,7 @@ export interface Platform {
   agent_ids?: string[] | null; // List of AI Agent IDs assigned to this platform
   ai_mode?: PlatformAIMode | null; // AI mode: auto, assist, or off
   fallback_to_ai_timeout?: number | null; // Timeout in seconds before AI takes over when ai_mode=assist
+  ai_reply_id?: string | null; // Selected AI reply integration ID for this platform
 }
 
 export type PlatformStatus = 'connected' | 'pending' | 'unconfigured' | 'disabled' | 'error';

@@ -23,6 +23,7 @@ from app.schemas import (
 )
 import httpx
 from app.core.config import settings
+from app.services.ai_config_service import AIConfigNotFoundError, get_ai_config_by_id, get_platform_ai_reply_id, set_platform_ai_reply_id
 
 
 logger = get_logger("endpoints.platforms")
@@ -78,6 +79,7 @@ def _build_platform_list_item(platform: Platform, language: str = "zh") -> Platf
 
         item.name = localized_name
         item.display_name = localized_name
+        item.ai_reply_id = get_platform_ai_reply_id(platform)
     except Exception:
         # In case anything unexpected happens, keep the original values.
         pass
@@ -104,6 +106,7 @@ def _build_platform_response(platform: Platform, language: str = "zh") -> Platfo
 
         response.name = localized_name
         response.display_name = localized_name
+        response.ai_reply_id = get_platform_ai_reply_id(platform)
     except Exception:
         pass
     return response
@@ -274,13 +277,20 @@ async def create_platform(
     logger.info(f"User {current_user.username} creating platform: {platform_data.name or '[auto]'}")
 
 
+    platform_config = set_platform_ai_reply_id(platform_data.config, platform_data.ai_reply_id)
+    if platform_data.ai_reply_id:
+        try:
+            get_ai_config_by_id(db, platform_data.ai_reply_id)
+        except AIConfigNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected AI reply not found") from exc
+
     # Create platform
     platform = Platform(
         project_id=current_user.project_id,
         name=platform_data.name,
         type=platform_data.type,
         api_key=generate_api_key(),
-        config=platform_data.config,
+        config=platform_config,
         is_active=platform_data.is_active,
         agent_ids=platform_data.agent_ids,
         ai_mode=platform_data.ai_mode.value if platform_data.ai_mode else None,
@@ -377,6 +387,15 @@ async def update_platform(
 
     # Update fields
     update_data = platform_data.model_dump(exclude_unset=True)
+    if "ai_reply_id" in update_data:
+        ai_reply_id = update_data.pop("ai_reply_id")
+        if ai_reply_id:
+            try:
+                get_ai_config_by_id(db, ai_reply_id)
+            except AIConfigNotFoundError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected AI reply not found") from exc
+        platform.config = set_platform_ai_reply_id(platform.config, ai_reply_id)
+
     for field, value in update_data.items():
         setattr(platform, field, value)
 

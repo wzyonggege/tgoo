@@ -168,6 +168,9 @@ export const usePlatformStore = create<PlatformState>()(
             if (Object.prototype.hasOwnProperty.call(updates, 'fallback_to_ai_timeout')) {
               payload.fallback_to_ai_timeout = updates.fallback_to_ai_timeout;
             }
+            if (Object.prototype.hasOwnProperty.call(updates, 'ai_reply_id')) {
+              payload.ai_reply_id = updates.ai_reply_id;
+            }
 
             // If we are updating config OR name during a "save" operation, 
             // we should generally ensure the platform is active.
@@ -208,6 +211,7 @@ export const usePlatformStore = create<PlatformState>()(
                     agent_ids: (p as any).agent_ids ?? null,
                     ai_mode: (p as any).ai_mode ?? null,
                     fallback_to_ai_timeout: (p as any).fallback_to_ai_timeout ?? null,
+                    ai_reply_id: (p as any).ai_reply_id ?? null,
                   };
                 };
 
@@ -264,6 +268,7 @@ export const usePlatformStore = create<PlatformState>()(
               agent_ids: (p as any).agent_ids ?? null,
               ai_mode: (p as any).ai_mode ?? null,
               fallback_to_ai_timeout: (p as any).fallback_to_ai_timeout ?? null,
+              ai_reply_id: (p as any).ai_reply_id ?? null,
             };
             set({
               platforms: state.platforms.some(pp => pp.id === platformId)

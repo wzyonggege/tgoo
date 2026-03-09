@@ -52,7 +52,7 @@ from app.schemas.chat import (
     OpenAIChatMessage,
 )
 from app.services import chat_service
-from app.services.ai_config_service import get_ai_config
+from app.services.ai_config_service import get_ai_config, get_ai_config_for_platform
 from app.core.logging import get_logger
 logger = get_logger(__name__)
 from app.services.file_service import sanitize_filename, get_safe_ascii_filename
@@ -478,7 +478,7 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
         return StreamingResponse(disabled_gen(), media_type="text/event-stream")
 
     # 7) AI is enabled: directly call AI service and stream response
-    ai_config = get_ai_config(db)
+    ai_config = get_ai_config_for_platform(db, platform)
     team_id = "default"
     response_client_msg_no = f"ai_{uuid4().hex}"
 
@@ -1125,7 +1125,7 @@ async def chat_completion_openai_compatible(
         )
 
     # 8) Call AI service directly
-    ai_config = get_ai_config(db)
+    ai_config = get_ai_config_for_platform(db, platform)
     team_id = "default"
     response_client_msg_no = f"ai_{uuid4().hex}"
 

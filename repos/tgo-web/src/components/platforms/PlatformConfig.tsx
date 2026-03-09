@@ -289,25 +289,29 @@ const PlatformConfig: React.FC<PlatformConfigProps> = ({ platform, onUpdate, onT
   const [aiAgentIds, setAiAgentIds] = useState<string[]>(platform?.agent_ids ?? []);
   const [aiMode, setAiMode] = useState<PlatformAIMode>(platform?.ai_mode ?? 'auto');
   const [fallbackTimeout, setFallbackTimeout] = useState<number | null>(platform?.fallback_to_ai_timeout ?? null);
+  const [aiReplyId, setAiReplyId] = useState<string | null>(platform?.ai_reply_id ?? null);
 
   useEffect(() => {
     if (platform) {
       setAiAgentIds(platform.agent_ids ?? []);
       setAiMode(platform.ai_mode ?? 'auto');
       setFallbackTimeout(platform.fallback_to_ai_timeout ?? null);
+      setAiReplyId(platform.ai_reply_id ?? null);
     }
-  }, [platform?.agent_ids, platform?.ai_mode, platform?.fallback_to_ai_timeout]);
+  }, [platform?.agent_ids, platform?.ai_mode, platform?.fallback_to_ai_timeout, platform?.ai_reply_id]);
 
   const hasAISettingsChanged = useMemo(() => {
     if (!platform) return false;
     const origAgentIds = platform.agent_ids ?? [];
     const origMode = platform.ai_mode ?? 'auto';
     const origTimeout = platform.fallback_to_ai_timeout ?? null;
+    const origAIReplyId = platform.ai_reply_id ?? null;
     const agentIdsChanged = JSON.stringify(aiAgentIds.sort()) !== JSON.stringify([...origAgentIds].sort());
     const modeChanged = aiMode !== origMode;
     const timeoutChanged = fallbackTimeout !== origTimeout;
-    return agentIdsChanged || modeChanged || timeoutChanged;
-  }, [aiAgentIds, aiMode, fallbackTimeout, platform]);
+    const aiReplyChanged = aiReplyId !== origAIReplyId;
+    return agentIdsChanged || modeChanged || timeoutChanged || aiReplyChanged;
+  }, [aiAgentIds, aiMode, fallbackTimeout, aiReplyId, platform]);
 
   const handleSaveAISettings = async () => {
     if (!platform) return;
@@ -316,6 +320,7 @@ const PlatformConfig: React.FC<PlatformConfigProps> = ({ platform, onUpdate, onT
         agent_ids: aiAgentIds.length > 0 ? aiAgentIds : null,
         ai_mode: aiMode,
         fallback_to_ai_timeout: aiMode === 'assist' ? fallbackTimeout : null,
+        ai_reply_id: aiReplyId,
       });
       showSuccess(showToast, t('platforms.config.aiSettings.saveSuccess', 'AI 设置已保存'));
     } catch (e) {
@@ -406,9 +411,11 @@ const PlatformConfig: React.FC<PlatformConfigProps> = ({ platform, onUpdate, onT
             agentIds={aiAgentIds}
             aiMode={aiMode}
             fallbackTimeout={fallbackTimeout}
+            aiReplyId={aiReplyId}
             onAgentIdsChange={setAiAgentIds}
             onAIModeChange={setAiMode}
             onFallbackTimeoutChange={setFallbackTimeout}
+            onAIReplyIdChange={setAiReplyId}
           />
           {hasAISettingsChanged && (
             <div className="mt-3 flex justify-end">

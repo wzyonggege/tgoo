@@ -81,9 +81,9 @@
     "respondDirectlyDesc": "跳过成员回答汇总，直接返回回答",
     "markdown": "Markdown 格式",
     "markdownDesc": "使用 Markdown 格式化输出内容",
-      "addDatetime": "添加日期时间",
-      "addDatetimeDesc": "在上下文中包含当前日期时间",
-      "numHistoryRuns": "历史会话轮数",
+    "addDatetime": "添加日期时间",
+    "addDatetimeDesc": "在上下文中包含当前日期时间",
+    "numHistoryRuns": "历史会话轮数",
     "toolCallLimit": "工具调用限制",
     "skillsEnabled": "启用技能",
     "skillsEnabledDesc": "允许 AI 员工自动发现并使用项目中的专业技能"
@@ -110,7 +110,7 @@
       "staff": "人工坐席",
       "notifications": "消息通知",
       "shortcuts": "快捷回复",
-      "providers": "模型提供商",
+      "providers": "AI回复接入",
       "about": "关于",
       "logout": "退出登录"
     },
@@ -427,8 +427,8 @@
       }
     },
     "providers": {
-      "title": "模型提供商",
-      "subtitle": "集中管理各大 AI 提供商的访问配置：密钥、安全代理、模型清单与默认模型。",
+      "title": "AI回复接入",
+      "subtitle": "集中管理多个 FastGPT / OpenAI 兼容接入，并在渠道中选择对应的回复 AI。",
       "docs": "查看文档",
       "add": "添加提供商",
       "addCustom": "自定义配置",
@@ -458,8 +458,8 @@
         "modelsTitle": "模型与默认值"
       },
       "fields": {
-        "kind": "提供商",
-        "name": "名称/别名",
+        "kind": "接入类型",
+        "name": "名称",
         "apiKey": "API Key",
         "baseUrl": "API Base URL",
         "models": "可用模型列表",
@@ -519,8 +519,8 @@
       },
       "toast": {
         "added": "已添加提供商",
-        "saved": "已保存修改",
-        "deleted": "已删除提供商",
+        "saved": "AI 回复接入已保存",
+        "deleted": "AI 回复接入已删除",
         "modelAdded": "模型已添加",
         "modelDeleted": "模型已删除"
       },
@@ -532,7 +532,7 @@
       "createModelOption": "创建",
       "confirmDeleteTitle": "删除提供商",
       "confirmDeleteMsg": "确定要删除该提供商配置吗？此操作不可撤销。",
-      "empty": "尚未配置任何模型提供商，点击右上角“从商店获取”或“自定义配置”开始。"
+      "empty": "还没有配置 AI 回复接入，点击右上角开始新增。"
     }
   },
   "comingSoon": {
