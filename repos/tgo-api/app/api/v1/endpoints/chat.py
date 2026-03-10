@@ -52,7 +52,7 @@ from app.schemas.chat import (
     OpenAIChatMessage,
 )
 from app.services import chat_service
-from app.services.ai_config_service import get_ai_config, get_ai_config_for_platform
+from app.services.ai_config_service import get_ai_config, get_ai_config_by_id, get_ai_config_for_platform
 from app.core.logging import get_logger
 logger = get_logger(__name__)
 from app.services.file_service import sanitize_filename, get_safe_ascii_filename
@@ -1307,15 +1307,20 @@ async def staff_team_chat(
         )
     ai_config = get_ai_config(db)
 
-    # 2) Build channel identifiers based on team_id or agent_id
+    # 2) Build channel identifiers based on team_id / agent_id / ai_reply_id
     if req.team_id:
         channel_id = f"{req.team_id}-team"
         target_team_id = str(req.team_id)
         target_agent_id = None
-    else:
+    elif req.agent_id:
         channel_id = f"{req.agent_id}-agent"
         target_team_id = None
         target_agent_id = str(req.agent_id)
+    else:
+        channel_id = f"{req.ai_reply_id}-aireply"
+        target_team_id = "default"
+        target_agent_id = None
+        ai_config = get_ai_config_by_id(db, str(req.ai_reply_id))
 
     channel_type = 1  # Personal channel type
 

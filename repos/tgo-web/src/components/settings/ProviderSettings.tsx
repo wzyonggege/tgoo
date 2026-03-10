@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   CirclePlus,
+  MessageSquare,
   Cpu,
   ExternalLink,
   Eye,
@@ -274,6 +276,7 @@ const ProviderSettings: React.FC = () => {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { user } = useAuthStore();
+  const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
 
   const [configs, setConfigs] = useState<AIProviderConfig[]>([]);
@@ -317,6 +320,15 @@ const ProviderSettings: React.FC = () => {
   const handleCreateClick = () => {
     setEditingConfig(null);
     setDialogOpen(true);
+  };
+
+  const handleChatClick = (config: AIProviderConfig) => {
+    navigate(`/chat/1/${config.id}-aireply`, {
+      state: {
+        agentName: config.name,
+        platform: 'ai_reply',
+      },
+    });
   };
 
   const handleEditClick = (config: AIProviderConfig) => {
@@ -452,6 +464,14 @@ const ProviderSettings: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleChatClick(config)}
+                    className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    {t('settings.providers.actions.chat', '发起对话')}
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleEditClick(config)}

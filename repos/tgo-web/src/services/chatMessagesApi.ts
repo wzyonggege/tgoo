@@ -12,10 +12,11 @@ export interface StaffSendPlatformMessageRequest {
 export type StaffSendPlatformMessageResponse = unknown;
 
 // Request type for staff-to-team/agent chat based on OpenAPI docs
-// Either team_id or agent_id must be provided (exactly one)
+// Exactly one of team_id, agent_id or ai_reply_id must be provided
 export interface StaffTeamChatRequest {
   team_id?: string | null; // AI Team ID to chat with (UUID format)
   agent_id?: string | null; // AI Agent ID to chat with (UUID format)
+  ai_reply_id?: string | null; // AI reply integration ID to chat with
   message: string; // Message content to send
   system_message?: string | null; // Optional system message/prompt
   expected_output?: string | null; // Optional expected output format

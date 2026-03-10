@@ -148,7 +148,8 @@ const ChatWindow: React.FC<ChatWindowProps> = React.memo(({
   // Check if current chat is an agent chat or team chat
   const isAgentChat = channelId?.endsWith('-agent') ?? false;
   const isTeamChat = channelId?.endsWith('-team') ?? false;
-  const isAIChat = isAgentChat || isTeamChat;
+  const isAIReplyChat = channelId?.endsWith('-aireply') ?? false;
+  const isAIChat = isAgentChat || isTeamChat || isAIReplyChat;
 
   // Enhanced message sending with platform-aware flow (REST first for non-website, then WebSocket)
   // For agent/team chats, use REST API instead of WebSocket
@@ -180,11 +181,16 @@ const ChatWindow: React.FC<ChatWindowProps> = React.memo(({
                 agent_id: agentId,
                 message: message.trim(),
               });
-            } else {
-              // Extract team_id from channelId (format: {team_id}-team)
+            } else if (isTeamChat) {
               const teamId = channelId.replace(/-team$/, '');
               response = await chatMessagesApiService.staffTeamChat({
                 team_id: teamId,
+                message: message.trim(),
+              });
+            } else {
+              const aiReplyId = channelId.replace(/-aireply$/, '');
+              response = await chatMessagesApiService.staffTeamChat({
+                ai_reply_id: aiReplyId,
                 message: message.trim(),
               });
             }
@@ -194,8 +200,8 @@ const ChatWindow: React.FC<ChatWindowProps> = React.memo(({
             });
             onSendMessage?.(message);
           } catch (e: any) {
-            const errorKey = isAgentChat ? 'chat.send.agentErrorLog' : 'chat.send.teamErrorLog';
-            const errorDefault = isAgentChat ? 'AI员工消息发送失败' : '团队消息发送失败';
+            const errorKey = isAgentChat ? 'chat.send.agentErrorLog' : isTeamChat ? 'chat.send.teamErrorLog' : 'chat.send.aiReplyErrorLog';
+            const errorDefault = isAgentChat ? 'AI员工消息发送失败' : isTeamChat ? '团队消息发送失败' : 'AI回复消息发送失败';
             console.error(t(errorKey, errorDefault), e);
             showApiError(showToast, e);
           }

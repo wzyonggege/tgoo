@@ -119,13 +119,15 @@ class StaffTeamChatRequest(BaseSchema):
     """Request payload for staff-to-team/agent chat.
 
     Notes:
-    - Either team_id or agent_id must be provided (exactly one)
+    - Exactly one of team_id, agent_id or ai_reply_id must be provided
     - If team_id is provided, channel_id will be {team_id}-team
     - If agent_id is provided, channel_id will be {agent_id}-agent
+    - If ai_reply_id is provided, channel_id will be {ai_reply_id}-aireply
     - Response is delivered via WuKongIM
     """
     team_id: Optional[UUID] = Field(None, description="AI Team ID to chat with")
     agent_id: Optional[UUID] = Field(None, description="AI Agent ID to chat with")
+    ai_reply_id: Optional[str] = Field(None, description="AI reply integration ID to chat with")
     message: str = Field(..., description="Message content to send")
     system_message: Optional[str] = Field(
         None, description="System message/prompt to guide the AI"
@@ -139,11 +141,12 @@ class StaffTeamChatRequest(BaseSchema):
 
     @model_validator(mode="after")
     def validate_team_or_agent(self) -> "StaffTeamChatRequest":
-        """Ensure exactly one of team_id or agent_id is provided."""
-        if self.team_id is None and self.agent_id is None:
-            raise ValueError("Either team_id or agent_id must be provided")
-        if self.team_id is not None and self.agent_id is not None:
-            raise ValueError("Only one of team_id or agent_id should be provided, not both")
+        """Ensure exactly one target is provided."""
+        target_count = sum(1 for value in (self.team_id, self.agent_id, self.ai_reply_id) if value is not None)
+        if target_count == 0:
+            raise ValueError("Either team_id, agent_id or ai_reply_id must be provided")
+        if target_count > 1:
+            raise ValueError("Only one of team_id, agent_id or ai_reply_id should be provided")
         return self
 
 

@@ -115,6 +115,16 @@ const ChatPage: React.FC = () => {
           name: locationState?.agentName,
           avatar: locationState?.agentAvatar
         });
+
+        if (locationState?.agentName || locationState?.agentAvatar) {
+          useChannelStore.getState().seedChannel(urlChannelId, targetChannelType, {
+            name: locationState?.agentName,
+            avatar: locationState?.agentAvatar,
+            channel_id: urlChannelId,
+            channel_type: targetChannelType,
+          });
+        }
+
         setActiveChat(newChat);
         loadHistoricalMessages(urlChannelId, targetChannelType);
         isSyncingFromUrl.current = false;
@@ -243,7 +253,8 @@ const ChatPage: React.FC = () => {
   // 判断当前会话是否是 agent 会话（channelId 以 -agent 结尾）或 team 会话（channelId 以 -team 结尾）
   const isAgentChat = activeChat?.channelId?.endsWith('-agent') ?? false;
   const isTeamChat = activeChat?.channelId?.endsWith('-team') ?? false;
-  const isAIChat = isAgentChat || isTeamChat;
+  const isAIReplyChat = activeChat?.channelId?.endsWith('-aireply') ?? false;
+  const isAIChat = isAgentChat || isTeamChat || isAIReplyChat;
   const showChatList = !isMobile || mobileView === 'list';
   const showChatWindow = !isMobile || mobileView === 'chat';
 

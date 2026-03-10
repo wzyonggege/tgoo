@@ -31,6 +31,7 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
   // 判断是否是 agent 会话（channelId 以 -agent 结尾）或 team 会话（channelId 以 -team 结尾）
   const isAgentChat = channelId?.endsWith('-agent') ?? false;
   const isTeamChat = channelId?.endsWith('-team') ?? false;
+  const isAIReplyChat = channelId?.endsWith('-aireply') ?? false;
 
   // Use unified hook for channel display info
   const { name, avatar, extra } = useChannelDisplay({
@@ -106,7 +107,7 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
         <div className="flex justify-between items-center">
           <h3 className={`text-sm font-semibold truncate flex items-center ${isActive ? 'text-white' : 'text-gray-800 dark:text-gray-200'}`}>
             <span className="truncate">{displayName}</span>
-            {isAgentChat ? (
+            {isAgentChat || isAIReplyChat ? (
               <Bot className={`w-3.5 h-3.5 ml-1 flex-shrink-0 ${isActive ? 'text-blue-100' : 'text-purple-500 dark:text-purple-400'}`} />
             ) : isTeamChat ? (
               <TbBrain className={`w-3.5 h-3.5 ml-1 flex-shrink-0 ${isActive ? 'text-blue-100' : 'text-green-500 dark:text-green-400'}`} />

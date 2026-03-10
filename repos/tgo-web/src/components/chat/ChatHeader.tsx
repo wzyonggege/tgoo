@@ -53,7 +53,8 @@ const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onBackTo
   // 判断是否是 agent 会话（channelId 以 -agent 结尾）或 team 会话（channelId 以 -team 结尾）
   const isAgentChat = activeChat.channelId?.endsWith('-agent') ?? false;
   const isTeamChat = activeChat.channelId?.endsWith('-team') ?? false;
-  const isAIChat = isAgentChat || isTeamChat;
+  const isAIReplyChat = activeChat.channelId?.endsWith('-aireply') ?? false;
+  const isAIChat = isAgentChat || isTeamChat || isAIReplyChat;
   
   // 使用 useChannelDisplay hook 获取频道展示信息
   const { name: channelName, extra } = useChannelDisplay({
@@ -230,8 +231,8 @@ const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onBackTo
         )}
         <h2 className="text-base md:text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center min-w-0">
           <span className="truncate">{displayName}</span>
-          {isAgentChat ? (
-            <span title={t('chat.header.agentTooltip', 'AI员工会话')}>
+          {isAgentChat || isAIReplyChat ? (
+            <span title={isAIReplyChat ? t('chat.header.aiReplyTooltip', 'AI回复会话') : t('chat.header.agentTooltip', 'AI员工会话')}>
               <Bot className="w-4 h-4 inline-block ml-1.5 -mt-0.5 text-purple-500 dark:text-purple-400" />
             </span>
           ) : isTeamChat ? (

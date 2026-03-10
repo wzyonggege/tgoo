@@ -814,12 +814,15 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     const apiChatKeys = new Set(myChats.map(c => getChannelKey(c.channelId, c.channelType)));
     
     // 过滤出不在 API 结果中的实时会话（新消息创建的，且有实际内容或特殊消息类型）
-    const newRealtimeChats = realtimeChats.filter(
-      c =>
+    const newRealtimeChats = realtimeChats.filter(c => {
+      const isAgentOrTeamChat = c.channelId?.endsWith('-agent') || c.channelId?.endsWith('-team') || c.channelId?.endsWith('-aireply');
+      const hasDisplayableContent = Boolean(c.lastMessage || c.payloadType === MessagePayloadType.STREAM || isAgentOrTeamChat);
+      return (
         !apiChatKeys.has(getChannelKey(c.channelId, c.channelType)) &&
-        (c.lastMessage || c.payloadType === MessagePayloadType.STREAM) &&
+        hasDisplayableContent &&
         matchTagFilter(c)
-    );
+      );
+    });
     
     // 合并并排序
     return sortChatsByTimestamp([...mergedFromApi, ...newRealtimeChats]);

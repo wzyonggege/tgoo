@@ -251,10 +251,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // Effect-based focus recovery - runs after every render
   // AI toggle integration
   
-  // 判断是否是 agent 会话（channelId 以 -agent 结尾）或 team 会话（channelId 以 -team 结尾）
+  // 判断是否是 agent / team / ai-reply 会话
   const isAgentChat = channelId?.endsWith('-agent') ?? false;
   const isTeamChat = channelId?.endsWith('-team') ?? false;
-  const isAIChat = isAgentChat || isTeamChat;
+  const isAIReplyChat = channelId?.endsWith('-aireply') ?? false;
+  const isAIChat = isAgentChat || isTeamChat || isAIReplyChat;
   
   const channelInfo = useChannelStore(state =>
     channelId && typeof channelType === 'number'
