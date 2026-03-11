@@ -1519,7 +1519,36 @@ const MessageInput: React.FC<MessageInputProps> = ({
     };
   }, [onSendMessage]);
 
-  // If conversation is closed, don't show input area
+  // If conversation is closed, allow re-accepting the visitor.
+  if (isClosed && visitorId) {
+    return (
+      <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
+        <div className="flex flex-col items-center justify-center py-6 space-y-3">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {t('chat.input.closed', '会话已结束')}
+          </p>
+          <button
+            onClick={handleAcceptVisitor}
+            disabled={isAccepting}
+            className="flex items-center space-x-2 px-6 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            {isAccepting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{t('chat.input.reaccept.accepting', '重新接入中...')}</span>
+              </>
+            ) : (
+              <>
+                <UserPlus className="w-4 h-4" />
+                <span>{t('chat.input.reaccept.button', '重新接入')}</span>
+              </>
+            )}
+          </button>
+        </div>
+      </footer>
+    );
+  }
+
   if (isClosed) {
     return (
       <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
