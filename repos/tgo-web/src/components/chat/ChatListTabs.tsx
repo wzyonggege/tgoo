@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
-export type ChatTabType = 'mine' | 'unassigned' | 'recent' | 'all' | 'manual';
+export type ChatTabType = 'mine' | 'unassigned' | 'recent' | 'all' | 'completed' | 'manual';
 
 interface ChatListTabsProps {
   activeTab: ChatTabType;
@@ -20,15 +20,16 @@ export const ChatListTabs: React.FC<ChatListTabsProps> = ({ activeTab, onTabChan
   const containerRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0, opacity: 1 });
-  const [visibleTabCount, setVisibleTabCount] = useState<number>(5); // 初始全部显示
+  const [visibleTabCount, setVisibleTabCount] = useState<number>(6); // 初始全部显示
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
 
   const allTabs = useMemo(() => [
     { key: 'mine' as ChatTabType, label: t('chat.list.tabs.mine', '我的'), count: counts.mine > 0 ? counts.mine : undefined },
     { key: 'unassigned' as ChatTabType, label: t('chat.list.tabs.unassigned', '未分配'), count: counts.unassigned > 0 ? counts.unassigned : undefined },
+    { key: 'all' as ChatTabType, label: t('chat.list.tabs.all', '全部') },
     { key: 'recent' as ChatTabType, label: t('chat.list.tabs.recent', '最近在线') },
-    { key: 'all' as ChatTabType, label: t('chat.list.tabs.all', '已完成') },
+    { key: 'completed' as ChatTabType, label: t('chat.list.tabs.completed', '已完成') },
     { key: 'manual' as ChatTabType, label: t('chat.list.tabs.manual', '转人工') },
   ], [t, counts.mine, counts.unassigned]);
 

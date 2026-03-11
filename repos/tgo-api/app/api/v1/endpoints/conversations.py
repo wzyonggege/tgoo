@@ -432,7 +432,9 @@ async def sync_all_conversations(
     is_admin = current_user.role == StaffRole.ADMIN.value
     
     # 1) Build a subquery of each visitor's latest session time (overall latest)
-    # Admin sees all sessions in the project, others see only their own sessions.
+    # - admin always sees all project conversations
+    # - regular staff also use project-wide scope for the new "all" tab
+    # - when only_completed_recent=true, regular staff keep the old behavior: only their served conversations
     # Note: when only_completed_recent=true, we require the visitor's *latest overall* session to be CLOSED.
     subquery_base = db.query(
         VisitorSession.visitor_id,
@@ -442,7 +444,7 @@ async def sync_all_conversations(
         VisitorSession.staff_id.isnot(None),
     )
     
-    if is_admin:
+    if is_admin or not only_completed_recent:
         subquery_base = subquery_base.filter(VisitorSession.project_id == current_user.project_id)
     else:
         subquery_base = subquery_base.filter(VisitorSession.staff_id == current_user.id)
@@ -463,7 +465,7 @@ async def sync_all_conversations(
             & (VisitorSession.staff_id.isnot(None)),
         )
     )
-    if is_admin:
+    if is_admin or not only_completed_recent:
         latest_sessions_query = latest_sessions_query.filter(VisitorSession.project_id == current_user.project_id)
     else:
         latest_sessions_query = latest_sessions_query.filter(VisitorSession.staff_id == current_user.id)

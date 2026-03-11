@@ -156,6 +156,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   const [myChats, setMyChats] = useState<Chat[]>([]);
   const [unassignedChats, setUnassignedChats] = useState<Chat[]>([]);
   const [allChats, setAllChats] = useState<Chat[]>([]);
+  const [completedChats, setCompletedChats] = useState<Chat[]>([]);
   const [manualChats, setManualChats] = useState<Chat[]>([]);
   const [recentVisitors, setRecentVisitors] = useState<VisitorResponse[]>([]);
   
@@ -163,18 +164,21 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   const [isLoadingMine, setIsLoadingMine] = useState(false);
   const [isLoadingUnassigned, setIsLoadingUnassigned] = useState(false);
   const [isLoadingAll, setIsLoadingAll] = useState(false);
+  const [isLoadingCompleted, setIsLoadingCompleted] = useState(false);
   const [isLoadingManual, setIsLoadingManual] = useState(false);
   const [isLoadingRecent, setIsLoadingRecent] = useState(false);
   
   // Loading more state for pagination
   const [isLoadingMoreUnassigned, setIsLoadingMoreUnassigned] = useState(false);
   const [isLoadingMoreAll, setIsLoadingMoreAll] = useState(false);
+  const [isLoadingMoreCompleted, setIsLoadingMoreCompleted] = useState(false);
   const [isLoadingMoreManual, setIsLoadingMoreManual] = useState(false);
   const [isLoadingMoreRecent, setIsLoadingMoreRecent] = useState(false);
   
   // Has more data for pagination
   const [hasMoreUnassigned, setHasMoreUnassigned] = useState(false);
   const [hasMoreAll, setHasMoreAll] = useState(false);
+  const [hasMoreCompleted, setHasMoreCompleted] = useState(false);
   const [hasMoreManual, setHasMoreManual] = useState(false);
   const [hasMoreRecent, setHasMoreRecent] = useState(false);
   
@@ -399,25 +403,21 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     }
   }, [isLoadingMoreUnassigned, hasMoreUnassigned, unassignedChats.length, convertWuKongIMToChat, seedChannel]);
   
-  // 获取"已完成"会话（每次切换到此 tab 都调用）
+  // 获取"全部"会话（项目级）
   const fetchAllConversations = useCallback(async () => {
     setIsLoadingAll(true);
     try {
-      const response = await conversationsApi.getAllConversations(20, PAGE_SIZE, 0, { only_completed_recent: true });
+      const response = await conversationsApi.getAllConversations(20, PAGE_SIZE, 0, { only_completed_recent: false });
       if (response?.conversations) {
         const chats = response.conversations.map(conv => convertWuKongIMToChat(conv));
         setAllChats(sortChatsByTimestamp(chats));
         setHasMoreAll(response.pagination?.has_next ?? false);
-        console.log(`📋 ChatList: Loaded "all" tab, ${chats.length} conversations, hasMore: ${response.pagination?.has_next}`);
-        
-        // 缓存频道信息，避免后续单独请求
         if (response.channels && response.channels.length > 0) {
           response.channels.forEach(channel => {
             if (channel.channel_id && channel.channel_type != null) {
               seedChannel(channel.channel_id, channel.channel_type, channel);
             }
           });
-          console.log(`📋 ChatList: Cached ${response.channels.length} channels from "all" tab`);
         }
       }
     } catch (error) {
@@ -426,22 +426,18 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       setIsLoadingAll(false);
     }
   }, [convertWuKongIMToChat, seedChannel]);
-  
-  // 加载更多"已完成"会话
+
   const loadMoreAllConversations = useCallback(async () => {
     if (isLoadingMoreAll || !hasMoreAll) return;
-    
+
     setIsLoadingMoreAll(true);
     try {
       const offset = allChats.length;
-      const response = await conversationsApi.getAllConversations(20, PAGE_SIZE, offset, { only_completed_recent: true });
+      const response = await conversationsApi.getAllConversations(20, PAGE_SIZE, offset, { only_completed_recent: false });
       if (response?.conversations) {
         const newChats = response.conversations.map(conv => convertWuKongIMToChat(conv));
-        setAllChats(prev => [...prev, ...newChats]);
+        setAllChats(prev => sortChatsByTimestamp([...prev, ...newChats]));
         setHasMoreAll(response.pagination?.has_next ?? false);
-        console.log(`📋 ChatList: Loaded more "all", +${newChats.length} conversations, hasMore: ${response.pagination?.has_next}`);
-        
-        // 缓存频道信息
         if (response.channels && response.channels.length > 0) {
           response.channels.forEach(channel => {
             if (channel.channel_id && channel.channel_type != null) {
@@ -456,6 +452,56 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       setIsLoadingMoreAll(false);
     }
   }, [isLoadingMoreAll, hasMoreAll, allChats.length, convertWuKongIMToChat, seedChannel]);
+
+  // 获取"已完成"会话
+  const fetchCompletedConversations = useCallback(async () => {
+    setIsLoadingCompleted(true);
+    try {
+      const response = await conversationsApi.getAllConversations(20, PAGE_SIZE, 0, { only_completed_recent: true });
+      if (response?.conversations) {
+        const chats = response.conversations.map(conv => convertWuKongIMToChat(conv));
+        setCompletedChats(sortChatsByTimestamp(chats));
+        setHasMoreCompleted(response.pagination?.has_next ?? false);
+        if (response.channels && response.channels.length > 0) {
+          response.channels.forEach(channel => {
+            if (channel.channel_id && channel.channel_type != null) {
+              seedChannel(channel.channel_id, channel.channel_type, channel);
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('📋 ChatList: Failed to load "completed" conversations:', error);
+    } finally {
+      setIsLoadingCompleted(false);
+    }
+  }, [convertWuKongIMToChat, seedChannel]);
+
+  const loadMoreCompletedConversations = useCallback(async () => {
+    if (isLoadingMoreCompleted || !hasMoreCompleted) return;
+
+    setIsLoadingMoreCompleted(true);
+    try {
+      const offset = completedChats.length;
+      const response = await conversationsApi.getAllConversations(20, PAGE_SIZE, offset, { only_completed_recent: true });
+      if (response?.conversations) {
+        const newChats = response.conversations.map(conv => convertWuKongIMToChat(conv));
+        setCompletedChats(prev => sortChatsByTimestamp([...prev, ...newChats]));
+        setHasMoreCompleted(response.pagination?.has_next ?? false);
+        if (response.channels && response.channels.length > 0) {
+          response.channels.forEach(channel => {
+            if (channel.channel_id && channel.channel_type != null) {
+              seedChannel(channel.channel_id, channel.channel_type, channel);
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('📋 ChatList: Failed to load more "completed" conversations:', error);
+    } finally {
+      setIsLoadingMoreCompleted(false);
+    }
+  }, [isLoadingMoreCompleted, hasMoreCompleted, completedChats.length, convertWuKongIMToChat, seedChannel]);
 
   // 获取"转人工"会话（按访客标签筛选，manual_service_contain=true）
   const fetchManualConversations = useCallback(async () => {
@@ -583,6 +629,9 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         case 'all':
           await fetchAllConversations();
           break;
+        case 'completed':
+          await fetchCompletedConversations();
+          break;
         case 'manual':
           await fetchManualConversations();
           break;
@@ -598,6 +647,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   }, [
     activeTab,
     fetchAllConversations,
+    fetchCompletedConversations,
     fetchManualConversations,
     fetchMyConversations,
     fetchRecentVisitors,
@@ -678,13 +728,15 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       fetchUnassignedConversations();
     } else if (activeTab === 'all') {
       fetchAllConversations();
+    } else if (activeTab === 'completed') {
+      fetchCompletedConversations();
     } else if (activeTab === 'manual') {
       fetchManualConversations();
     } else if (activeTab === 'recent') {
       fetchRecentVisitors();
     }
     // 'mine' tab 不在这里处理，由标签筛选 effect 统一管理
-  }, [activeTab, fetchUnassignedConversations, fetchAllConversations, fetchManualConversations]);
+  }, [activeTab, fetchUnassignedConversations, fetchAllConversations, fetchCompletedConversations, fetchManualConversations, fetchRecentVisitors]);
   
   // 当 refreshTrigger 变化时，强制刷新"我的"和"未分配"列表及数量
   const prevRefreshTriggerRef = useRef(refreshTrigger);
@@ -736,6 +788,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         return remaining;
       });
       setAllChats(prev => prev.filter(c => !(c.channelId === channelId && c.channelType === channelType)));
+      setCompletedChats(prev => prev.filter(c => !(c.channelId === channelId && c.channelType === channelType)));
     }
   }, [deletedChatChannel, activeChat, activeTab, onChatSelect]);
   
@@ -941,12 +994,14 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         return unassignedChats;
       case 'all':
         return mergedAllChats;
+      case 'completed':
+        return completedChats;
       case 'manual':
         return manualChats;
       default:
         return mergedMyChats;
     }
-  }, [activeTab, mergedMyChats, unassignedChats, mergedAllChats, manualChats]);
+  }, [activeTab, mergedMyChats, unassignedChats, mergedAllChats, completedChats, manualChats]);
 
   // Calculate counts for tabs
   // "我的" tab 显示会话数量，"未分配" tab 显示等待数量
@@ -1088,6 +1143,8 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         return isLoadingUnassigned;
       case 'all':
         return isLoadingAll;
+      case 'completed':
+        return isLoadingCompleted;
       case 'manual':
         return isLoadingManual;
       case 'recent':
@@ -1095,7 +1152,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       default:
         return false;
     }
-  }, [activeTab, isLoadingMine, isLoadingUnassigned, isLoadingAll, isLoadingManual, isLoadingRecent]);
+  }, [activeTab, isLoadingMine, isLoadingUnassigned, isLoadingAll, isLoadingCompleted, isLoadingManual, isLoadingRecent]);
   
   // 是否正在加载更多
   const isLoadingMore = useMemo(() => {
@@ -1104,6 +1161,8 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         return isLoadingMoreUnassigned;
       case 'all':
         return isLoadingMoreAll;
+      case 'completed':
+        return isLoadingMoreCompleted;
       case 'manual':
         return isLoadingMoreManual;
       case 'recent':
@@ -1111,7 +1170,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       default:
         return false;
     }
-  }, [activeTab, isLoadingMoreUnassigned, isLoadingMoreAll, isLoadingMoreManual, isLoadingMoreRecent]);
+  }, [activeTab, isLoadingMoreUnassigned, isLoadingMoreAll, isLoadingMoreCompleted, isLoadingMoreManual, isLoadingMoreRecent]);
   
   // 是否还有更多数据
   const hasMore = useMemo(() => {
@@ -1120,6 +1179,8 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         return hasMoreUnassigned;
       case 'all':
         return hasMoreAll;
+      case 'completed':
+        return hasMoreCompleted;
       case 'manual':
         return hasMoreManual;
       case 'recent':
@@ -1127,7 +1188,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       default:
         return false;
     }
-  }, [activeTab, hasMoreUnassigned, hasMoreAll, hasMoreManual, hasMoreRecent]);
+  }, [activeTab, hasMoreUnassigned, hasMoreAll, hasMoreCompleted, hasMoreManual, hasMoreRecent]);
   
   // 滚动事件处理 - 上拉加载更多
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -1145,13 +1206,15 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         loadMoreUnassignedConversations();
       } else if (activeTab === 'all') {
         loadMoreAllConversations();
+      } else if (activeTab === 'completed') {
+        loadMoreCompletedConversations();
       } else if (activeTab === 'manual') {
         loadMoreManualConversations();
       } else if (activeTab === 'recent') {
         loadMoreRecentVisitors();
       }
     }
-  }, [activeTab, isLoadingMore, hasMore, loadMoreUnassignedConversations, loadMoreAllConversations, loadMoreManualConversations, loadMoreRecentVisitors]);
+  }, [activeTab, isLoadingMore, hasMore, loadMoreUnassignedConversations, loadMoreAllConversations, loadMoreCompletedConversations, loadMoreManualConversations, loadMoreRecentVisitors]);
 
   return (
     <div className="w-full md:w-72 md:shrink-0 bg-white/90 dark:bg-gray-800/90 backdrop-blur-lg border-r border-gray-200/60 dark:border-gray-700/60 flex flex-col min-w-0">
@@ -1429,7 +1492,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
               </div>
             )}
             {/* 没有更多数据提示 */}
-            {!hasMore && filteredChats.length > 0 && (activeTab === 'unassigned' || activeTab === 'all' || activeTab === 'manual') && (
+            {!hasMore && filteredChats.length > 0 && (activeTab === 'unassigned' || activeTab === 'all' || activeTab === 'completed' || activeTab === 'manual') && (
               <div className="flex items-center justify-center py-3">
                 <span className="text-xs text-gray-400 dark:text-gray-500">{t('common.noMore')}</span>
               </div>

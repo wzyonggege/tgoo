@@ -308,27 +308,36 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [isAccepting, setIsAccepting] = useState(false);
   
   // Handle accepting a visitor from the waiting queue
-  const handleAcceptVisitor = useCallback(async () => {
-    if (!visitorId || isAccepting) return;
-    
+  const acceptVisitorForReply = useCallback(async (silent = false): Promise<boolean> => {
+    if (!visitorId || !isQueued || isAccepting) return true;
+
     try {
       setIsAccepting(true);
       await conversationsApi.acceptVisitor(visitorId);
-      
-      // Refresh channel info to get updated service_status
+
       if (channelId && typeof channelType === 'number') {
         const channelStore = useChannelStore.getState();
         await channelStore.refreshChannel({ channel_id: channelId, channel_type: channelType });
       }
-      
-      showSuccess(showToast, t('chat.input.accept.successTitle', '接入成功'), t('chat.input.accept.successMessage', '访客已成功接入'));
-      
-      // Notify parent to switch to "my" tab
-      onAcceptVisitor?.();
+
+      if (!silent) {
+        showSuccess(showToast, t('chat.input.accept.successTitle', '接入成功'), t('chat.input.accept.successMessage', '访客已成功接入'));
+      }
+      return true;
     } catch (error) {
       showApiError(showToast, error);
+      return false;
     } finally {
       setIsAccepting(false);
+    }
+  }, [visitorId, isQueued, isAccepting, channelId, channelType, showToast, t]);
+
+  const handleAcceptVisitor = useCallback(async () => {
+    if (!visitorId || isAccepting) return;
+    
+    const success = await acceptVisitorForReply(false);
+    if (success) {
+      onAcceptVisitor?.();
     }
   }, [visitorId, isAccepting, channelId, channelType, showToast, t, onAcceptVisitor]);
 
@@ -1462,36 +1471,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
     };
   }, [onSendMessage]);
 
-  // If visitor is in queued status, show accept button instead of input area
-  if (isQueued && visitorId) {
-    return (
-      <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
-        <div className="flex flex-col items-center justify-center py-6 space-y-3">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('chat.input.accept.hint', '该访客正在等待接入')}
-          </p>
-          <button
-            onClick={handleAcceptVisitor}
-            disabled={isAccepting}
-            className="flex items-center space-x-2 px-6 py-2.5 bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white text-sm font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-          >
-            {isAccepting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>{t('chat.input.accept.accepting', '接入中...')}</span>
-              </>
-            ) : (
-              <>
-                <UserPlus className="w-4 h-4" />
-                <span>{t('chat.input.accept.button', '接入访客')}</span>
-              </>
-            )}
-          </button>
-        </div>
-      </footer>
-    );
-  }
-
   // If conversation is closed, don't show input area
   if (isClosed) {
     return (
@@ -1524,6 +1503,22 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   return (
     <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
+      {isQueued && visitorId && (
+        <div className="mb-2 rounded-md border border-amber-200 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-900/20 px-3 py-2 flex items-center justify-between gap-3">
+          <p className="text-xs text-amber-800 dark:text-amber-200">
+            {t('chat.input.accept.replyAssignHint', '该访客当前未分配，发送消息后将自动接入并分配给你')}
+          </p>
+          <button
+            onClick={handleAcceptVisitor}
+            disabled={isAccepting}
+            className="inline-flex items-center gap-1 rounded-md bg-green-500 px-3 py-1.5 text-xs text-white hover:bg-green-600 disabled:opacity-60"
+          >
+            {isAccepting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+            <span>{t('chat.input.accept.button', '接入访客')}</span>
+          </button>
+        </div>
+      )}
+
       {quickReplyOpen && (
         <div className="mb-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 max-h-48 md:max-h-56 overflow-y-auto">
           {quickReplyLoading ? (
