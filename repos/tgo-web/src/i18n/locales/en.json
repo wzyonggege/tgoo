@@ -2044,8 +2044,9 @@
         "mine": "Mine",
         "unassigned": "Unassigned",
         "recent": "Recently Online",
-        "all": "Completed",
-        "manual": "Manual Service"
+        "all": "All",
+        "manual": "Manual Service",
+        "completed": "Completed"
       },
       "waiting": {
         "justNow": "Just now",
