@@ -627,7 +627,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
           await Promise.all([fetchUnassignedConversations(), fetchUnassignedCount()]);
           break;
         case 'all':
-          await fetchAllConversations();
+          await Promise.all([fetchAllConversations(), fetchUnassignedConversations()]);
           break;
         case 'completed':
           await fetchCompletedConversations();
@@ -648,6 +648,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     activeTab,
     fetchAllConversations,
     fetchCompletedConversations,
+    fetchUnassignedConversations,
     fetchManualConversations,
     fetchMyConversations,
     fetchRecentVisitors,
@@ -728,6 +729,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       fetchUnassignedConversations();
     } else if (activeTab === 'all') {
       fetchAllConversations();
+      fetchUnassignedConversations();
     } else if (activeTab === 'completed') {
       fetchCompletedConversations();
     } else if (activeTab === 'manual') {
@@ -985,6 +987,23 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     return sortChatsByTimestamp(allChats);
   }, [allChats]);
 
+  const mergedProjectAllChats = useMemo(() => {
+    const merged = new Map<string, Chat>();
+
+    for (const chat of allChats) {
+      merged.set(getChannelKey(chat.channelId, chat.channelType), chat);
+    }
+
+    for (const chat of unassignedChats) {
+      const key = getChannelKey(chat.channelId, chat.channelType);
+      if (!merged.has(key)) {
+        merged.set(key, chat);
+      }
+    }
+
+    return sortChatsByTimestamp(Array.from(merged.values()));
+  }, [allChats, unassignedChats]);
+
   // Get the appropriate chat list based on active tab
   const getChatsForTab = useCallback((): Chat[] => {
     switch (activeTab) {
@@ -993,7 +1012,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       case 'unassigned':
         return unassignedChats;
       case 'all':
-        return mergedAllChats;
+        return mergedProjectAllChats;
       case 'completed':
         return completedChats;
       case 'manual':
@@ -1001,7 +1020,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       default:
         return mergedMyChats;
     }
-  }, [activeTab, mergedMyChats, unassignedChats, mergedAllChats, completedChats, manualChats]);
+  }, [activeTab, mergedMyChats, unassignedChats, mergedAllChats, mergedProjectAllChats, completedChats, manualChats]);
 
   // Calculate counts for tabs
   // "我的" tab 显示会话数量，"未分配" tab 显示等待数量

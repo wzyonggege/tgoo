@@ -12,6 +12,7 @@ import { MessagePayloadType, PlatformType } from '@/types';
 import { DEFAULT_CHANNEL_TYPE } from '@/constants';
 import { visitorApiService } from '@/services/visitorApi';
 import { conversationsApi } from '@/services/conversationsApi';
+import { staffApi } from '@/services/staffApi';
 import { useToast } from '@/hooks/useToast';
 import { showApiError, showSuccess } from '@/utils/toastHelpers';
 import Toggle from '@/components/ui/Toggle';
@@ -283,7 +284,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const assignedStaffChannelInfo = useChannelStore(state => 
     assignedStaffChannelId ? state.getChannel(assignedStaffChannelId, 1) : undefined
   );
-  const assignedStaffName = assignedStaffChannelInfo?.name;
+  const [assignedStaffNameOverride, setAssignedStaffNameOverride] = useState<string | null>(null);
+  const assignedStaffName = assignedStaffChannelInfo?.name || assignedStaffNameOverride;
   
   // agent/team 会话时不禁用手动输入
   const isManualDisabled = isAIChat ? false : isAIEnabled;
@@ -299,13 +301,36 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // 当访客分配给其他坐席时，获取该坐席的频道信息以显示名字
   const ensureChannel = useChannelStore(state => state.ensureChannel);
   useEffect(() => {
+    let cancelled = false;
+
     if (assignedStaffChannelId && !assignedStaffChannelInfo) {
-      ensureChannel({ channel_id: assignedStaffChannelId, channel_type: DEFAULT_CHANNEL_TYPE });
+      ensureChannel({ channel_id: assignedStaffChannelId, channel_type: DEFAULT_CHANNEL_TYPE }).catch(() => undefined);
     }
-  }, [assignedStaffChannelId, assignedStaffChannelInfo, ensureChannel]);
+
+    if (assignedStaffId && !assignedStaffChannelInfo?.name) {
+      staffApi.getStaff(assignedStaffId).then((staff) => {
+        if (!cancelled) {
+          setAssignedStaffNameOverride(staff.nickname || staff.username || null);
+        }
+      }).catch(() => {
+        if (!cancelled) {
+          setAssignedStaffNameOverride(null);
+        }
+      });
+    } else {
+      setAssignedStaffNameOverride(null);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assignedStaffId, assignedStaffChannelId, assignedStaffChannelInfo, ensureChannel]);
 
   const [isTogglingAI, setIsTogglingAI] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
+  const user = useAuthStore(state => state.user);
+  const isAdmin = user?.role === 'admin';
+  const isNotMyVisitor = !isQueued && assignedStaffId && user?.id && assignedStaffId !== user.id && !isAdmin;
   
   // Handle accepting a visitor from the waiting queue
   const acceptVisitorForReply = useCallback(async (silent = false): Promise<boolean> => {
@@ -341,8 +366,31 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }
   }, [visitorId, isAccepting, channelId, channelType, showToast, t, onAcceptVisitor]);
 
+  const takeoverVisitorForReply = useCallback(async (silent = false): Promise<boolean> => {
+    if (!visitorId || !user?.id || !isNotMyVisitor) return true;
+
+    try {
+      setIsAccepting(true);
+      await visitorApiService.transferSession(visitorId, user.id, 'Takeover via reply');
+
+      if (channelId && typeof channelType === 'number') {
+        const channelStore = useChannelStore.getState();
+        await channelStore.refreshChannel({ channel_id: channelId, channel_type: channelType });
+      }
+
+      if (!silent) {
+        showSuccess(showToast, t('chat.input.takeover.successTitle', '接管成功'), t('chat.input.takeover.successMessage', '会话已接管并分配给你'));
+      }
+      return true;
+    } catch (error) {
+      showApiError(showToast, error);
+      return false;
+    } finally {
+      setIsAccepting(false);
+    }
+  }, [visitorId, user?.id, isNotMyVisitor, channelId, channelType, showToast, t]);
+
   // Image upload & send (WeChat-like)
-  const user = useAuthStore(state => state.user);
   const addMessage = useChatStore(state => state.addMessage);
   const updateConversationLastMessage = useChatStore(state => state.updateConversationLastMessage);
   const moveConversationToTop = useChatStore(state => state.moveConversationToTop);
@@ -1484,25 +1532,30 @@ const MessageInput: React.FC<MessageInputProps> = ({
     );
   }
 
-  // If visitor is assigned to another staff, don't show input area
-  // Only check when assignedStaffId exists and is not the current user
-  const isAdmin = user?.role === 'admin';
-  const isNotMyVisitor = assignedStaffId && user?.id && assignedStaffId !== user.id && !isAdmin;
-  if (isNotMyVisitor) {
-    const staffDisplayName = assignedStaffName || t('chat.input.otherAgent', '其他坐席');
-    return (
-      <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
-        <div className="flex items-center justify-center py-4">
-          <p className="text-sm text-gray-400 dark:text-gray-500">
-            {t('chat.input.notMyVisitor', '该访客已分配给 {{name}}', { name: staffDisplayName })}
-          </p>
-        </div>
-      </footer>
-    );
-  }
+  // If visitor is assigned to another staff, allow takeover from the all-tab flow.
 
   return (
     <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
+      {isNotMyVisitor && (
+        <div className="mb-2 rounded-md border border-blue-200 dark:border-blue-700 bg-blue-50/70 dark:bg-blue-900/20 px-3 py-2 flex items-center justify-between gap-3">
+          <p className="text-xs text-blue-800 dark:text-blue-200">
+            {t('chat.input.takeover.replyHint', '该访客当前已分配给 {{name}}，发送消息后将自动接管给你', { name: assignedStaffName || t('chat.input.otherAgent', '其他坐席') })}
+          </p>
+          <button
+            onClick={async () => {
+              const success = await takeoverVisitorForReply(false);
+              if (success) {
+                onAcceptVisitor?.();
+              }
+            }}
+            disabled={isAccepting}
+            className="inline-flex items-center gap-1 rounded-md bg-blue-500 px-3 py-1.5 text-xs text-white hover:bg-blue-600 disabled:opacity-60"
+          >
+            {isAccepting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+            <span>{t('chat.input.takeover.button', '接管会话')}</span>
+          </button>
+        </div>
+      )}
       {isQueued && visitorId && (
         <div className="mb-2 rounded-md border border-amber-200 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-900/20 px-3 py-2 flex items-center justify-between gap-3">
           <p className="text-xs text-amber-800 dark:text-amber-200">

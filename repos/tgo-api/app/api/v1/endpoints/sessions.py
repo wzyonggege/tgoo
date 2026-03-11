@@ -223,8 +223,10 @@ async def transfer_session(
             detail="Session is not open"
         )
     
-    # Check permission: only assigned staff or admin can transfer
-    if session.staff_id != current_user.id and current_user.role != "admin":
+    # Check permission: assigned staff/admin can transfer anyone;
+    # regular staff may also take over by transferring the session to themselves.
+    is_self_takeover = request.target_staff_id == current_user.id
+    if session.staff_id != current_user.id and current_user.role != "admin" and not is_self_takeover:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only transfer sessions assigned to you"
@@ -243,10 +245,10 @@ async def transfer_session(
             detail="Target staff not found"
         )
     
-    if target_staff.id == current_user.id:
+    if target_staff.id == current_user.id and session.staff_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot transfer to yourself"
+            detail="Session is already assigned to you"
         )
     
     if not target_staff.is_active:
@@ -383,8 +385,10 @@ async def transfer_session_by_visitor_id(
             detail="No open session found for this visitor"
         )
     
-    # Check permission: only assigned staff or admin can transfer
-    if session.staff_id != current_user.id and current_user.role != "admin":
+    # Check permission: assigned staff/admin can transfer anyone;
+    # regular staff may also take over by transferring the session to themselves.
+    is_self_takeover = request.target_staff_id == current_user.id
+    if session.staff_id != current_user.id and current_user.role != "admin" and not is_self_takeover:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only transfer sessions assigned to you"
@@ -403,10 +407,10 @@ async def transfer_session_by_visitor_id(
             detail="Target staff not found"
         )
     
-    if target_staff.id == current_user.id:
+    if target_staff.id == current_user.id and session.staff_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot transfer to yourself"
+            detail="Session is already assigned to you"
         )
     
     if not target_staff.is_active:
