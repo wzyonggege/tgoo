@@ -10,10 +10,11 @@ import { useAuthStore } from '@/stores/authStore';
 import type { ChannelVisitorExtra, Message } from '@/types';
 import { MessagePayloadType, PlatformType } from '@/types';
 import { DEFAULT_CHANNEL_TYPE } from '@/constants';
-import { visitorApiService } from '@/services/visitorApi';
+import { visitorApiService, type VisitorResponse } from '@/services/visitorApi';
 import { conversationsApi } from '@/services/conversationsApi';
 import { staffApi } from '@/services/staffApi';
 import { useToast } from '@/hooks/useToast';
+import { useAIReplyOptions } from '@/hooks/useAIReplyDisplayName';
 import { showApiError, showSuccess } from '@/utils/toastHelpers';
 import Toggle from '@/components/ui/Toggle';
 import EmojiPickerPopover from '@/components/chat/EmojiPickerPopover';
@@ -275,9 +276,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // 2. If ai_disabled is set, use its value (!ai_disabled -> ON)
   const aiDisabledRaw = visitorExtra?.ai_disabled;
   const aiMode = visitorExtra?.ai_settings?.ai_mode ?? 'auto';
+  const currentAIReplyName = visitorExtra?.ai_settings?.ai_reply_name?.trim()
+    || t('chat.input.ai.defaultReplyName', '系统默认 AI');
+  const visitorAIReplyOverrideId = visitorExtra?.ai_reply_id ?? null;
   const isAIEnabled = (aiDisabledRaw === null || aiDisabledRaw === undefined) 
     ? (aiMode === 'auto') 
     : !aiDisabledRaw;
+  const { options: aiReplyOptions, isLoading: isLoadingAIReplyOptions } = useAIReplyOptions();
   
   // 获取分配坐席的频道信息（用于显示坐席名字）
   const assignedStaffChannelId = assignedStaffId ? `${assignedStaffId}-staff` : undefined;
@@ -327,10 +332,37 @@ const MessageInput: React.FC<MessageInputProps> = ({
   }, [assignedStaffId, assignedStaffChannelId, assignedStaffChannelInfo, ensureChannel]);
 
   const [isTogglingAI, setIsTogglingAI] = useState(false);
+  const [isUpdatingAIReply, setIsUpdatingAIReply] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const user = useAuthStore(state => state.user);
   const isAdmin = user?.role === 'admin';
   const isNotMyVisitor = !isQueued && assignedStaffId && user?.id && assignedStaffId !== user.id && !isAdmin;
+
+  const syncVisitorAIState = useCallback((updated: VisitorResponse, fallbackAiDisabled: boolean): void => {
+    if (!channelId || typeof channelType !== 'number') return;
+
+    const chatStore = useChatStore.getState();
+    const channelStore = useChannelStore.getState();
+    const current = channelStore.getChannel(channelId, channelType);
+    if (!current) return;
+
+    const currentExtra = (current.extra as ChannelVisitorExtra | undefined) ?? {
+      id: visitorId ?? '',
+      platform_id: '',
+      platform_type: PlatformType.WEBSITE,
+      platform_open_id: '',
+    };
+
+    const newExtra: ChannelVisitorExtra = {
+      ...currentExtra,
+      ai_disabled: updated.ai_disabled ?? fallbackAiDisabled,
+      ai_reply_id: updated.ai_reply_id ?? null,
+      ai_settings: updated.ai_settings ?? currentExtra.ai_settings ?? null,
+    };
+
+    channelStore.seedChannel(channelId, channelType, { extra: newExtra });
+    chatStore.applyChannelInfo(channelId, channelType, { ...current, extra: newExtra });
+  }, [channelId, channelType, visitorId]);
   
   // Handle accepting a visitor from the waiting queue
   const acceptVisitorForReply = useCallback(async (silent = false): Promise<boolean> => {
@@ -702,9 +734,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       setIsTogglingAI(true);
 
-      const chatStore = useChatStore.getState();
-      const channelStore = useChannelStore.getState();
-
       // Call appropriate API to reach desired state
       const updated = nextEnabled
         ? await visitorApiService.enableAI(visitorId)
@@ -717,20 +746,40 @@ const MessageInput: React.FC<MessageInputProps> = ({
         showSuccess(showToast, t('chat.input.ai.disabledTitle', 'AI已禁用'), t('chat.input.ai.disabledMessage', '访客AI助手已禁用'));
       }
 
-      // Patch local store state to reflect new status immediately
-      const current = channelStore.getChannel(channelId, channelType);
-      if (current) {
-        const newAiDisabled = (updated as any)?.ai_disabled ?? !nextEnabled;
-        const newExtra = { ...(current.extra as any), ai_disabled: newAiDisabled };
-        channelStore.seedChannel(channelId, channelType, { extra: newExtra });
-        chatStore.applyChannelInfo(channelId, channelType, { ...current, extra: newExtra });
-      }
+      syncVisitorAIState(updated, !nextEnabled);
     } catch (error) {
       showApiError(showToast, error);
     } finally {
       setIsTogglingAI(false);
     }
-  }, [visitorId, channelId, channelType, isAIEnabled, showToast]);
+  }, [visitorId, channelId, channelType, isAIEnabled, showToast, syncVisitorAIState, t]);
+
+  const handleChangeAIReply = useCallback(async (nextAiReplyId: string) => {
+    if (!visitorId) return;
+
+    const normalizedAiReplyId = nextAiReplyId || null;
+    if (normalizedAiReplyId === visitorAIReplyOverrideId) return;
+
+    try {
+      setIsUpdatingAIReply(true);
+      const updated = await visitorApiService.updateVisitor(visitorId, {
+        ai_reply_id: normalizedAiReplyId,
+      });
+
+      syncVisitorAIState(updated, updated.ai_disabled ?? !isAIEnabled);
+      showSuccess(
+        showToast,
+        t('chat.input.ai.replyUpdatedTitle', 'AI 回复已更新'),
+        t('chat.input.ai.replyUpdatedMessage', '当前会话已切换为 {{name}}', {
+          name: updated.ai_settings?.ai_reply_name || t('chat.input.ai.defaultReplyName', '系统默认 AI'),
+        }),
+      );
+    } catch (error) {
+      showApiError(showToast, error);
+    } finally {
+      setIsUpdatingAIReply(false);
+    }
+  }, [visitorId, visitorAIReplyOverrideId, isAIEnabled, showToast, syncVisitorAIState, t]);
 
   useEffect(() => {
     if (shouldMaintainFocus.current) {
@@ -1704,7 +1753,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
         {/* AI 助手开关 - agent/team 会话时不显示 */}
         {!isAIChat && (
-          <div className="flex items-center space-x-2" title={isAIEnabled ? t('chat.input.ai.enabled', 'AI已启用') : t('chat.input.ai.disabled', 'AI已禁用')}>
+          <div className="flex items-center gap-2 flex-wrap" title={isAIEnabled ? t('chat.input.ai.enabled', 'AI已启用') : t('chat.input.ai.disabled', 'AI已禁用')}>
             <span className="text-xs text-gray-600 dark:text-gray-400 select-none">{t('chat.input.ai.label', 'AI助手')}</span>
             <Toggle
               aria-label={t('chat.input.ai.toggleAria', '切换AI助手')}
@@ -1712,6 +1761,26 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onChange={handleChangeAI}
               disabled={!visitorId || isTogglingAI}
             />
+            <span className="text-xs text-gray-500 dark:text-gray-400 select-none">
+              {t('chat.input.ai.currentReply', '当前：{{name}}', { name: currentAIReplyName })}
+            </span>
+            <select
+              aria-label={t('chat.input.ai.replySelectorAria', '切换当前会话使用的 AI 回复')}
+              value={visitorAIReplyOverrideId ?? ''}
+              onChange={(event) => { void handleChangeAIReply(event.target.value); }}
+              disabled={!visitorId || isUpdatingAIReply || isLoadingAIReplyOptions}
+              className="h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 text-xs text-gray-700 dark:text-gray-200 disabled:opacity-60"
+            >
+              <option value="">{t('chat.input.ai.followDefault', '跟随渠道默认')}</option>
+              {aiReplyOptions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            {(isUpdatingAIReply || isLoadingAIReplyOptions) && (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500" />
+            )}
           </div>
         )}
       </div>

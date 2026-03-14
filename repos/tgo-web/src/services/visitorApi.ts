@@ -44,6 +44,11 @@ export interface VisitorAttributesUpdateRequest {
   custom_attributes?: Record<string, string | null> | null;
 }
 
+export interface VisitorUpdateRequest {
+  ai_disabled?: boolean | null;
+  ai_reply_id?: string | null;
+}
+
 // Complete visitor response structure from API (GET /v1/visitors/{visitor_id})
 export interface VisitorResponse {
   id: string;
@@ -63,6 +68,7 @@ export interface VisitorResponse {
   source?: string | null;
   note?: string | null;
   custom_attributes: Record<string, string | null>;
+  ai_reply_id?: string | null;
   first_visit_time: string;
   last_visit_time: string;
   last_offline_time?: string | null;
@@ -231,6 +237,17 @@ class VisitorApiService extends BaseApiService {
     const endpoint = this.endpoints.visitorAttributes(visitorId);
     // The API expects the exact format as defined in VisitorAttributesUpdateRequest
     return this.put<VisitorResponse>(endpoint, attributes);
+  }
+
+  /**
+   * Update visitor using PATCH /v1/visitors/{visitor_id}
+   */
+  async updateVisitor(
+    visitorId: string,
+    payload: VisitorUpdateRequest
+  ): Promise<VisitorResponse> {
+    const endpoint = this.endpoints.visitorById(visitorId);
+    return this.patch<VisitorResponse>(endpoint, payload);
   }
 
   /**

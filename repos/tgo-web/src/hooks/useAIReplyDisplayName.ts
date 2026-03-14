@@ -41,6 +41,50 @@ const loadAIReplyOptions = async (): Promise<AIProviderConfigOption[]> => {
   return pendingOptionsRequest;
 };
 
+export const useAIReplyOptions = (): {
+  options: AIProviderConfigOption[];
+  isLoading: boolean;
+} => {
+  const [options, setOptions] = useState<AIProviderConfigOption[]>(() => cachedOptions ?? []);
+  const [isLoading, setIsLoading] = useState<boolean>(() => cachedOptions === null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (cachedOptions) {
+      setOptions(cachedOptions);
+      setIsLoading(false);
+      return;
+    }
+
+    const load = async (): Promise<void> => {
+      setIsLoading(true);
+      try {
+        const nextOptions = await loadAIReplyOptions();
+        if (!cancelled) {
+          setOptions(nextOptions);
+        }
+      } catch {
+        if (!cancelled) {
+          setOptions([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { options, isLoading };
+};
+
 export const useAIReplyDisplayName = (channelId?: string): string | null => {
   const aiReplyId = useMemo(() => getAIReplyIdFromChannelId(channelId), [channelId]);
   const [displayName, setDisplayName] = useState<string | null>(() => getCachedOptionName(aiReplyId));

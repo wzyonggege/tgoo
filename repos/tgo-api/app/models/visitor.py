@@ -192,6 +192,11 @@ class Visitor(Base):
         default=None,
         comment="Whether AI responses are disabled for this visitor"
     )
+    ai_reply_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="Visitor-specific AI reply integration override"
+    )
     ai_fallback_retry_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

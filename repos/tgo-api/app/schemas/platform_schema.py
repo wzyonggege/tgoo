@@ -53,7 +53,8 @@ class PlatformAISettings(BaseSchema):
     ai_mode: Optional[PlatformAIMode] = Field(None, description="AI mode: auto, assist, or off")
     agent_ids: Optional[List[UUID]] = Field(None, description="List of AI Agent IDs assigned to this platform")
     fallback_to_ai_timeout: Optional[int] = Field(None, description="Timeout in seconds before AI takes over when ai_mode=assist")
-    ai_reply_id: Optional[str] = Field(None, description="Selected AI reply integration ID for this platform")
+    ai_reply_id: Optional[str] = Field(None, description="Effective AI reply integration ID for this platform or visitor")
+    ai_reply_name: Optional[str] = Field(None, description="Effective AI reply integration display name")
 
 
 class PlatformCreate(PlatformBase):

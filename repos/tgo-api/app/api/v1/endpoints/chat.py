@@ -478,7 +478,7 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
         return StreamingResponse(disabled_gen(), media_type="text/event-stream")
 
     # 7) AI is enabled: directly call AI service and stream response
-    ai_config = get_ai_config_for_platform(db, platform)
+    ai_config = get_ai_config_for_platform(db, platform, getattr(visitor, "ai_reply_id", None))
     team_id = "default"
     response_client_msg_no = f"ai_{uuid4().hex}"
 
@@ -1125,7 +1125,7 @@ async def chat_completion_openai_compatible(
         )
 
     # 8) Call AI service directly
-    ai_config = get_ai_config_for_platform(db, platform)
+    ai_config = get_ai_config_for_platform(db, platform, getattr(visitor, "ai_reply_id", None))
     team_id = "default"
     response_client_msg_no = f"ai_{uuid4().hex}"
 
@@ -1161,6 +1161,7 @@ async def chat_completion_openai_compatible(
                     team_id=team_id,
                     system_message=system_message,
                     agent_ids=platform_agent_ids,
+                    custom_uid=platform_open_id,
                     ai_config=ai_config,
                 ):
                     event_type = event_payload.get("event_type")

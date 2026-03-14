@@ -1045,6 +1045,8 @@ export interface ChannelAIInsights {
 export interface VisitorAISettings {
   ai_mode: PlatformAIMode;
   fallback_to_ai_timeout?: number | null;
+  ai_reply_id?: string | null;
+  ai_reply_name?: string | null;
 }
 
 // Visitor service status enum
@@ -1075,6 +1077,7 @@ export interface ChannelVisitorExtra {
   last_offline_time?: string;
   is_online?: boolean;
   ai_disabled?: boolean; // True means AI is disabled for this visitor
+  ai_reply_id?: string | null; // Visitor-specific AI reply override ID
   ai_settings?: VisitorAISettings | null;
   assigned_staff_id?: string; // ID of the staff member assigned to this visitor
   ai_insights?: ChannelAIInsights | null; // AI insights from backend

@@ -149,7 +149,7 @@ def _build_enriched_visitor_payload(
             "assigned_staff_id": assigned_staff_id,
         }
     )
-    populate_visitor_ai_settings(visitor_payload, visitor.platform)
+    populate_visitor_ai_settings(visitor_payload, visitor.platform, db, visitor.ai_reply_id)
     localize_visitor_response_intent(visitor_payload, accept_language)
 
     # Include configured platform name for conversation list/channel display.

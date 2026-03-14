@@ -5,12 +5,14 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from pydantic import EmailStr, Field, field_validator
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.platform import PlatformType
 from app.schemas.base import BaseSchema, PaginatedResponse, SoftDeleteMixin, TimestampMixin
 from app.schemas.tag import TagResponse
 from app.schemas.platform_schema import PlatformAISettings
+from app.services.ai_config_service import get_ai_config_for_platform
 
 
 def _resolve_avatar_url(avatar_url: Optional[str]) -> Optional[str]:
@@ -237,6 +239,10 @@ class VisitorUpdate(VisitorAttributesUpdate):
         None,
         description="Whether AI responses are disabled for this visitor"
     )
+    ai_reply_id: Optional[str] = Field(
+        None,
+        description="Visitor-specific AI reply integration override; null means follow platform default"
+    )
     last_visit_time: Optional[datetime] = Field(
         None,
         description="Updated last visit time"
@@ -309,6 +315,10 @@ class VisitorResponse(VisitorInDB):
         None,
         description="Whether AI responses are disabled for this visitor"
     )
+    ai_reply_id: Optional[str] = Field(
+        None,
+        description="Visitor-specific AI reply integration override"
+    )
     display_nickname: Optional[str] = Field(
         None,
         description="Display nickname based on client language (nickname_zh for zh, nickname for others)"
@@ -363,6 +373,9 @@ class VisitorBasicResponse(BaseSchema):
     )
     ai_disabled: Optional[bool] = Field(
         None, description="Whether AI responses are disabled for this visitor"
+    )
+    ai_reply_id: Optional[str] = Field(
+        None, description="Visitor-specific AI reply integration override"
     )
     is_online: bool = Field(..., description="Whether the visitor is currently online/active")
     last_offline_time: Optional[datetime] = Field(None, description="Most recent time visitor went offline")
@@ -658,14 +671,21 @@ def set_visitor_list_display_nickname(
 
 def populate_visitor_ai_settings(
     response: Union[VisitorResponse, VisitorBasicResponse],
-    platform: Any  # Should be a Platform model instance
+    platform: Any,  # Should be a Platform model instance
+    db: Session,
+    visitor_ai_reply_id: Optional[str] = None,
 ) -> Union[VisitorResponse, VisitorBasicResponse]:
     """
-    Populate ai_settings field from platform model.
+    Populate ai_settings field from platform model and visitor-specific override.
     """
     if platform:
+        ai_config = get_ai_config_for_platform(db, platform, visitor_ai_reply_id)
         response.ai_settings = PlatformAISettings(
             ai_mode=getattr(platform, "ai_mode", None),
-            fallback_to_ai_timeout=getattr(platform, "fallback_to_ai_timeout", None)
+            fallback_to_ai_timeout=getattr(platform, "fallback_to_ai_timeout", None),
+            ai_reply_id=ai_config.get("id"),
+            ai_reply_name=ai_config.get("name"),
         )
+    if hasattr(response, "ai_reply_id"):
+        response.ai_reply_id = visitor_ai_reply_id
     return response

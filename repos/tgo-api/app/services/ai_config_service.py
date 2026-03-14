@@ -381,9 +381,13 @@ def get_platform_ai_reply_id(platform: Platform) -> Optional[str]:
 
 
 
-def get_ai_config_for_platform(db: Session, platform: Platform) -> AIConfigRecord:
-    """Return the selected AI reply config for a platform, with default fallback."""
-    selected_id = get_platform_ai_reply_id(platform)
+def get_ai_config_for_platform(
+    db: Session,
+    platform: Platform,
+    override_ai_reply_id: Optional[str] = None,
+) -> AIConfigRecord:
+    """Return the effective AI reply config for a platform, with optional visitor override."""
+    selected_id = (override_ai_reply_id or "").strip() or get_platform_ai_reply_id(platform)
     if selected_id:
         try:
             return get_ai_config_by_id(db, selected_id)

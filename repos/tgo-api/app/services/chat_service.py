@@ -218,6 +218,7 @@ async def _fastgpt_stream_response(
     system_message: Optional[str],
     expected_output: Optional[str],
     user_id: str,
+    custom_uid: Optional[str],
     ai_config: Dict[str, Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Generate pseudo-stream events for FastGPT provider."""
@@ -249,7 +250,7 @@ async def _fastgpt_stream_response(
 
     start_time = time.perf_counter()
     conversation_id = session_id or channel_id or uuid4().hex
-    user_identifier = user_id or from_uid
+    user_identifier = (custom_uid or "").strip() or user_id or from_uid
 
     text = await fastgpt_client.generate_response(
         message,
@@ -318,6 +319,7 @@ async def process_ai_stream_to_wukongim(
     expected_output: Optional[str] = None,
     agent_ids: Optional[List[str]] = None,
     agent_id: Optional[str] = None,
+    custom_uid: Optional[str] = None,
     ai_config: Optional[Dict[str, Any]] = None,
 ):
     """Process AI stream and forward events to WuKongIM, while yielding events for SSE."""
@@ -344,6 +346,7 @@ async def process_ai_stream_to_wukongim(
             system_message=system_message,
             expected_output=expected_output,
             user_id=user_id,
+            custom_uid=custom_uid,
             ai_config=ai_config or {},
         ):
             event_type = event.get("event_type")
@@ -383,6 +386,7 @@ async def handle_ai_response_non_stream(
     expected_output: Optional[str] = None,
     agent_ids: Optional[List[str]] = None,
     agent_id: Optional[str] = None,
+    custom_uid: Optional[str] = None,
     ai_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Handle AI completion in a non-streaming way, while still forwarding to WuKongIM."""
@@ -406,6 +410,7 @@ async def handle_ai_response_non_stream(
             system_message=system_message,
             expected_output=expected_output,
             user_id=visitor_id,
+            custom_uid=custom_uid,
             ai_config=ai_config or {},
         ):
             event_type = event.get("event_type")
@@ -446,6 +451,7 @@ async def run_background_ai_interaction(
     agent_ids: Optional[List[str]] = None,
     agent_id: Optional[str] = None,
     started_event: Optional[asyncio.Event] = None,
+    custom_uid: Optional[str] = None,
     ai_config: Optional[Dict[str, Any]] = None,
 ):
     """Run AI interaction in the background.
@@ -467,6 +473,7 @@ async def run_background_ai_interaction(
         expected_output=expected_output,
         agent_ids=agent_ids,
         agent_id=agent_id,
+        custom_uid=custom_uid,
         ai_config=ai_config or {},
     ):
         # Signal that AI processing has started
