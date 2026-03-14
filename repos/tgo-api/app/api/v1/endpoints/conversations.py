@@ -34,7 +34,6 @@ from app.schemas.wukongim import (
     WuKongIMConversationSyncRequest,
     WuKongIMConversationSyncResponse,
     WuKongIMConversationWithChannelsResponse,
-    WuKongIMConversationWithChannelsPaginatedResponse,
     WuKongIMDeleteConversationRequest,
     WuKongIMSetUnreadRequest,
 )
