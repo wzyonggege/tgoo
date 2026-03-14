@@ -15,6 +15,7 @@ from app.models import (
     VisitorWaitingQueue,
     WaitingStatus,
     AssignmentSource,
+    VisitorServiceStatus,
 )
 from app.schemas.visitor_waiting_queue import (
     WaitingQueueListResponse,
@@ -254,6 +255,12 @@ async def get_waiting_count(
         VisitorWaitingQueue.project_id == project_id,
         VisitorWaitingQueue.status == WaitingStatus.WAITING.value,
     ).count()
+
+    new_visitors_count = db.query(Visitor).filter(
+        Visitor.project_id == project_id,
+        Visitor.deleted_at.is_(None),
+        Visitor.service_status == VisitorServiceStatus.NEW.value,
+    ).count()
     
     assigned_count = db.query(VisitorWaitingQueue).filter(
         VisitorWaitingQueue.project_id == project_id,
@@ -261,9 +268,11 @@ async def get_waiting_count(
     ).count()
     
     return {
-        "waiting": waiting_count,
+        "waiting": waiting_count + new_visitors_count,
         "assigned": assigned_count,
-        "total": waiting_count + assigned_count,
+        "total": waiting_count + new_visitors_count + assigned_count,
+        "new": new_visitors_count,
+        "queued": waiting_count,
     }
 
 

@@ -404,7 +404,7 @@ async def sync_my_conversations(
 
 @router.post(
     "/all",
-    response_model=WuKongIMConversationPaginatedResponse,
+    response_model=WuKongIMConversationWithChannelsPaginatedResponse,
     summary="获取所有服务过的访客会话",
     description="获取当前客服服务过的所有访客会话列表（基于 VisitorSession 表，包括已关闭的会话），支持分页。",
 )
@@ -418,7 +418,7 @@ async def sync_all_conversations(
     offset: int = Query(default=0, ge=0, description="跳过的会话数量"),
     db: Session = Depends(get_db),
     current_user: Staff = Depends(get_current_active_user),
-) -> WuKongIMConversationPaginatedResponse:
+) -> WuKongIMConversationWithChannelsPaginatedResponse:
     """
     获取当前客服服务过的所有访客会话（支持分页）。
     
@@ -562,8 +562,23 @@ async def sync_all_conversations(
         has_next = (offset + limit) < total_count
         has_prev = offset > 0
         
-        return WuKongIMConversationPaginatedResponse(
+        channel_infos = await _build_channels_for_conversations(
+            db=db,
             conversations=conversations,
+            project_id=current_user.project_id,
+            user_language=user_language,
+            accept_language=http_request.headers.get("Accept-Language"),
+            include_closed_and_queued=True,
+        )
+
+        valid_channel_ids = {ch.channel_id for ch in channel_infos}
+        filtered_conversations = [
+            conv for conv in conversations if (conv.channel_type != CHANNEL_TYPE_CUSTOMER_SERVICE) or (conv.channel_id in valid_channel_ids)
+        ]
+
+        return WuKongIMConversationWithChannelsPaginatedResponse(
+            conversations=filtered_conversations,
+            channels=channel_infos,
             pagination=PaginationMetadata(
                 total=total_count,
                 limit=limit,
@@ -583,48 +598,26 @@ async def sync_all_conversations(
 
 @router.post(
     "/waiting",
-    response_model=WuKongIMConversationPaginatedResponse,
+    response_model=WuKongIMConversationWithChannelsPaginatedResponse,
     summary="获取等待中访客的会话",
     description="获取所有等待中（未分配）访客的 WuKongIM 会话列表，用于客服查看待接入访客的对话内容，支持分页。",
 )
 async def sync_waiting_conversations(
+    http_request: Request,
     msg_count: int = Query(default=20, ge=1, le=100, description="每个会话返回的最近消息数量"),
     limit: int = Query(default=20, ge=1, le=100, description="每页返回的会话数量"),
     offset: int = Query(default=0, ge=0, description="跳过的会话数量"),
     db: Session = Depends(get_db),
     current_user: Staff = Depends(require_permission("visitors:read")),
-) -> WuKongIMConversationPaginatedResponse:
+    user_language: UserLanguage = Depends(get_user_language),
+) -> WuKongIMConversationWithChannelsPaginatedResponse:
     """
     获取等待中访客的会话列表（支持分页）。
     
-    此接口获取当前项目中所有状态为 WAITING 的访客的 WuKongIM 会话信息，
+    此接口获取当前项目中所有未分配访客（状态为 NEW 或处于 WAITING 队列）的 WuKongIM 会话信息，
     包括最近的消息记录。用于客服人员查看待接入访客的对话内容。
     """
-    # 1. Get total count of waiting entries
-    total_count = (
-        db.query(VisitorWaitingQueue)
-        .filter(
-            VisitorWaitingQueue.project_id == current_user.project_id,
-            VisitorWaitingQueue.status == WaitingStatus.WAITING.value,
-            VisitorWaitingQueue.visitor_id.isnot(None),
-        )
-        .count()
-    )
-    
-    if total_count == 0:
-        logger.debug("No waiting visitors found")
-        return WuKongIMConversationPaginatedResponse(
-            conversations=[],
-            pagination=PaginationMetadata(
-                total=0,
-                limit=limit,
-                offset=offset,
-                has_next=False,
-                has_prev=False,
-            )
-        )
-    
-    # 2. Query paginated waiting visitors from queue (ordered by created_at desc, newest first)
+    # 1. Collect all unassigned visitor candidates (WAITING queue + NEW visitors)
     waiting_entries = (
         db.query(VisitorWaitingQueue)
         .filter(
@@ -633,15 +626,56 @@ async def sync_waiting_conversations(
             VisitorWaitingQueue.visitor_id.isnot(None),
         )
         .order_by(VisitorWaitingQueue.created_at.desc())
-        .offset(offset)
-        .limit(limit)
         .all()
     )
-    
-    if not waiting_entries:
-        logger.debug("No waiting visitors found after pagination")
-        return WuKongIMConversationPaginatedResponse(
+
+    ordered_visitors: list[tuple[UUID, object]] = []
+    seen_visitor_ids: set[UUID] = set()
+    for entry in waiting_entries:
+        if entry.visitor_id and entry.visitor_id not in seen_visitor_ids:
+            seen_visitor_ids.add(entry.visitor_id)
+            ordered_visitors.append((entry.visitor_id, entry.created_at))
+
+    new_visitors = (
+        db.query(Visitor)
+        .filter(
+            Visitor.project_id == current_user.project_id,
+            Visitor.deleted_at.is_(None),
+            Visitor.service_status == VisitorServiceStatus.NEW.value,
+        )
+        .order_by(Visitor.last_visit_time.desc(), Visitor.created_at.desc())
+        .all()
+    )
+
+    for visitor in new_visitors:
+        if visitor.id not in seen_visitor_ids:
+            seen_visitor_ids.add(visitor.id)
+            ordered_visitors.append((visitor.id, visitor.last_visit_time or visitor.created_at))
+
+    ordered_visitors.sort(key=lambda item: item[1], reverse=True)
+    total_count = len(ordered_visitors)
+
+    if total_count == 0:
+        logger.debug("No unassigned visitors found")
+        return WuKongIMConversationWithChannelsPaginatedResponse(
             conversations=[],
+            channels=[],
+            pagination=PaginationMetadata(
+                total=0,
+                limit=limit,
+                offset=offset,
+                has_next=False,
+                has_prev=False,
+            )
+        )
+
+    visitor_ids = [visitor_id for visitor_id, _ in ordered_visitors[offset: offset + limit]]
+
+    if not visitor_ids:
+        logger.debug("No unassigned visitors found after pagination")
+        return WuKongIMConversationWithChannelsPaginatedResponse(
+            conversations=[],
+            channels=[],
             pagination=PaginationMetadata(
                 total=total_count,
                 limit=limit,
@@ -650,21 +684,21 @@ async def sync_waiting_conversations(
                 has_prev=offset > 0,
             )
         )
-    
-    # 3. Build channel list for WuKongIM
+
+    # 2. Build channel list for WuKongIM
     channels: List[dict] = []
-    for entry in waiting_entries:
-        channel_id = build_visitor_channel_id(entry.visitor_id)
+    for visitor_id in visitor_ids:
+        channel_id = build_visitor_channel_id(visitor_id)
         channels.append({
             "channel_id": channel_id,
             "channel_type": CHANNEL_TYPE_CUSTOMER_SERVICE,
         })
-    
+
     logger.info(
-        f"Fetching conversations for {len(channels)} waiting visitors (page offset={offset}, limit={limit})",
+        f"Fetching conversations for {len(channels)} unassigned visitors (page offset={offset}, limit={limit})",
         extra={
             "staff_id": str(current_user.id),
-            "total_waiting": total_count,
+            "total_unassigned": total_count,
             "page_count": len(channels),
             "msg_count": msg_count,
             "offset": offset,
@@ -688,7 +722,7 @@ async def sync_waiting_conversations(
         ]
         
         logger.info(
-            f"Successfully fetched {len(conversations)} conversations for waiting visitors",
+            f"Successfully fetched {len(conversations)} conversations for unassigned visitors",
             extra={
                 "staff_id": str(current_user.id),
                 "conversation_count": len(conversations),

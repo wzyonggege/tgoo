@@ -268,8 +268,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const visitorId = visitorExtra?.id;
   const serviceStatus = visitorExtra?.service_status;
   const assignedStaffId = visitorExtra?.assigned_staff_id;
-  const isQueued = serviceStatus === 'queued' || serviceStatus === 'new';
+  const isNewVisitor = serviceStatus === 'new';
+  const isQueued = serviceStatus === 'queued' || isNewVisitor;
   const isClosed = serviceStatus === 'closed';
+  const canAcceptVisitor = isQueued || isClosed;
   
   // AI status logic:
   // 1. If ai_disabled is not set (null/undefined), use ai_mode (auto -> ON, others -> OFF)
@@ -365,7 +367,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   
   // Handle accepting a visitor from the waiting queue
   const acceptVisitorForReply = useCallback(async (silent = false): Promise<boolean> => {
-    if (!visitorId || !isQueued || isAccepting) return true;
+    if (!visitorId || !canAcceptVisitor || isAccepting) return true;
 
     try {
       setIsAccepting(true);
@@ -386,7 +388,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     } finally {
       setIsAccepting(false);
     }
-  }, [visitorId, isQueued, isAccepting, channelId, channelType, showToast, t]);
+  }, [visitorId, canAcceptVisitor, isAccepting, channelId, channelType, showToast, t]);
 
   const handleAcceptVisitor = useCallback(async () => {
     if (!visitorId || isAccepting) return;
