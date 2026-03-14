@@ -335,8 +335,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [isUpdatingAIReply, setIsUpdatingAIReply] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const user = useAuthStore(state => state.user);
-  const isAdmin = user?.role === 'admin';
-  const isNotMyVisitor = !isQueued && assignedStaffId && user?.id && assignedStaffId !== user.id && !isAdmin;
+  const needsTakeoverForReply = !isQueued && !!assignedStaffId && !!user?.id && assignedStaffId !== user.id;
 
   const syncVisitorAIState = useCallback((updated: VisitorResponse, fallbackAiDisabled: boolean): void => {
     if (!channelId || typeof channelType !== 'number') return;
@@ -399,7 +398,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   }, [visitorId, isAccepting, channelId, channelType, showToast, t, onAcceptVisitor]);
 
   const takeoverVisitorForReply = useCallback(async (silent = false): Promise<boolean> => {
-    if (!visitorId || !user?.id || !isNotMyVisitor) return true;
+    if (!visitorId || !user?.id || !needsTakeoverForReply) return true;
 
     try {
       setIsAccepting(true);
@@ -420,7 +419,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
     } finally {
       setIsAccepting(false);
     }
-  }, [visitorId, user?.id, isNotMyVisitor, channelId, channelType, showToast, t]);
+  }, [visitorId, user?.id, needsTakeoverForReply, channelId, channelType, showToast, t]);
+
+  const ensureConversationReadyForReply = useCallback(async (): Promise<boolean> => {
+    if (isQueued) {
+      return await acceptVisitorForReply(true);
+    }
+    if (needsTakeoverForReply) {
+      return await takeoverVisitorForReply(true);
+    }
+    return true;
+  }, [isQueued, needsTakeoverForReply, acceptVisitorForReply, takeoverVisitorForReply]);
 
   // Image upload & send (WeChat-like)
   const addMessage = useChatStore(state => state.addMessage);
@@ -841,6 +850,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const handleSend = async (): Promise<void> => {
     if (isManualDisabled) return;
     if (isSending || isSendingLocal) return;
+
+    const readyForReply = await ensureConversationReadyForReply();
+    if (!readyForReply) return;
     
     // If streaming in progress, cancel it instead of sending
     if (isStreamingInProgress) {
@@ -1614,7 +1626,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   return (
     <footer className="px-3 py-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-gray-200/80 dark:border-gray-700/80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg sticky bottom-0 z-10">
-      {isNotMyVisitor && (
+      {needsTakeoverForReply && (
         <div className="mb-2 rounded-md border border-blue-200 dark:border-blue-700 bg-blue-50/70 dark:bg-blue-900/20 px-3 py-2 flex items-center justify-between gap-3">
           <p className="text-xs text-blue-800 dark:text-blue-200">
             {t('chat.input.takeover.replyHint', '该访客当前已分配给 {{name}}，发送消息后将自动接管给你', { name: assignedStaffName || t('chat.input.otherAgent', '其他坐席') })}

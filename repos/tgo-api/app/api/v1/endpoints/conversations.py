@@ -228,7 +228,6 @@ async def _sync_project_latest_conversations_for_admin(
         .filter(
             VisitorSession.project_id == current_user.project_id,
             VisitorSession.visitor_id.isnot(None),
-            VisitorSession.staff_id.isnot(None),
         )
         .group_by(VisitorSession.visitor_id)
         .subquery()
