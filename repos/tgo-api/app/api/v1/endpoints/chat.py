@@ -1236,6 +1236,7 @@ async def chat_completion_openai_compatible(
         team_id=team_id,
         system_message=system_message,
         agent_ids=platform_agent_ids,
+        custom_uid=platform_open_id,
         ai_config=ai_config,
     )
     
