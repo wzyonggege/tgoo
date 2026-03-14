@@ -994,7 +994,7 @@ async def _llm_assign_staff(
             system_message=system_prompt,
             config_override=ai_config,
             chat_id=f"assignment-{visitor.id}",
-            custom_uid=str(visitor.id),
+            custom_uid=visitor.platform_open_id or str(visitor.id),
         )
         result["llm_response"] = content
         
