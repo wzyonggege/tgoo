@@ -430,11 +430,11 @@ async def sync_all_conversations(
     # Check if current user is admin
     is_admin = current_user.role == StaffRole.ADMIN.value
     
-    # 1) Build a subquery of each visitor's latest session time (overall latest)
-    # - admin always sees all project conversations
-    # - regular staff also use project-wide scope for the new "all" tab
-    # - when only_completed_recent=true, regular staff keep the old behavior: only their served conversations
-    # Note: when only_completed_recent=true, we require the visitor's *latest overall* session to be CLOSED.
+    # 1) Build ordered visitor list for the project-wide "all" tab.
+    # For only_completed_recent=true, keep historical session-based behavior.
+    ordered_visitors: list[tuple[UUID, object]] = []
+    seen_visitor_ids: set[UUID] = set()
+
     subquery_base = db.query(
         VisitorSession.visitor_id,
         func.max(VisitorSession.created_at).label("latest_created_at")
@@ -442,15 +442,14 @@ async def sync_all_conversations(
         VisitorSession.visitor_id.isnot(None),
         VisitorSession.staff_id.isnot(None),
     )
-    
+
     if is_admin or not only_completed_recent:
         subquery_base = subquery_base.filter(VisitorSession.project_id == current_user.project_id)
     else:
         subquery_base = subquery_base.filter(VisitorSession.staff_id == current_user.id)
-    
+
     latest_session_subquery = subquery_base.group_by(VisitorSession.visitor_id).subquery()
 
-    # 2) Join back to the latest session row so we can filter by its status
     latest_sessions_query = (
         db.query(
             latest_session_subquery.c.visitor_id,
@@ -470,15 +469,59 @@ async def sync_all_conversations(
         latest_sessions_query = latest_sessions_query.filter(VisitorSession.staff_id == current_user.id)
 
     if only_completed_recent:
-        # A visitor is considered "completed" only when the visitor's latest session is CLOSED
         latest_sessions_query = latest_sessions_query.filter(VisitorSession.status == SessionStatus.CLOSED.value)
 
-    # Total count of visitors after applying filters
-    total_count = latest_sessions_query.distinct(latest_session_subquery.c.visitor_id).count()
+    latest_session_rows = (
+        latest_sessions_query
+        .order_by(latest_session_subquery.c.latest_created_at.desc())
+        .all()
+    )
+
+    for visitor_id, latest_created_at in latest_session_rows:
+        if visitor_id and visitor_id not in seen_visitor_ids:
+            seen_visitor_ids.add(visitor_id)
+            ordered_visitors.append((visitor_id, latest_created_at))
+
+    if not only_completed_recent:
+        waiting_entries = (
+            db.query(VisitorWaitingQueue)
+            .filter(
+                VisitorWaitingQueue.project_id == current_user.project_id,
+                VisitorWaitingQueue.status == WaitingStatus.WAITING.value,
+                VisitorWaitingQueue.visitor_id.isnot(None),
+            )
+            .order_by(VisitorWaitingQueue.created_at.desc())
+            .all()
+        )
+
+        for entry in waiting_entries:
+            if entry.visitor_id and entry.visitor_id not in seen_visitor_ids:
+                seen_visitor_ids.add(entry.visitor_id)
+                ordered_visitors.append((entry.visitor_id, entry.created_at))
+
+        new_visitors = (
+            db.query(Visitor)
+            .filter(
+                Visitor.project_id == current_user.project_id,
+                Visitor.deleted_at.is_(None),
+                Visitor.service_status == VisitorServiceStatus.NEW.value,
+            )
+            .order_by(Visitor.last_visit_time.desc(), Visitor.created_at.desc())
+            .all()
+        )
+
+        for visitor in new_visitors:
+            if visitor.id not in seen_visitor_ids:
+                seen_visitor_ids.add(visitor.id)
+                ordered_visitors.append((visitor.id, visitor.last_visit_time or visitor.created_at))
+
+    ordered_visitors.sort(key=lambda item: item[1], reverse=True)
+    total_count = len(ordered_visitors)
     if total_count == 0:
         logger.debug(f"No sessions found for staff {current_user.username}")
-        return WuKongIMConversationPaginatedResponse(
+        return WuKongIMConversationWithChannelsPaginatedResponse(
             conversations=[],
+            channels=[],
             pagination=PaginationMetadata(
                 total=0,
                 limit=limit,
@@ -487,22 +530,14 @@ async def sync_all_conversations(
                 has_prev=False,
             )
         )
-    
-    # 3) Get paginated visitor_ids ordered by latest session created time (newest first)
-    paginated_visitor_ids = (
-        latest_sessions_query
-        .order_by(latest_session_subquery.c.latest_created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    
-    visitor_ids = [row[0] for row in paginated_visitor_ids]
-    
+
+    visitor_ids = [visitor_id for visitor_id, _ in ordered_visitors[offset: offset + limit]]
+
     if not visitor_ids:
         logger.debug("No valid visitor IDs found after pagination")
-        return WuKongIMConversationPaginatedResponse(
+        return WuKongIMConversationWithChannelsPaginatedResponse(
             conversations=[],
+            channels=[],
             pagination=PaginationMetadata(
                 total=total_count,
                 limit=limit,
@@ -511,8 +546,7 @@ async def sync_all_conversations(
                 has_prev=offset > 0,
             )
         )
-    
-    # 3. Build channel list for WuKongIM
+
     channels: List[dict] = []
     for visitor_id in visitor_ids:
         channel_id = build_visitor_channel_id(visitor_id)
@@ -520,14 +554,14 @@ async def sync_all_conversations(
             "channel_id": channel_id,
             "channel_type": CHANNEL_TYPE_CUSTOMER_SERVICE,
         })
-    
+
     logger.info(
         f"Fetching {'all project' if is_admin else 'staff'} conversations for {len(channels)} visitors (page offset={offset}, limit={limit})",
         extra={
             "staff_id": str(current_user.id),
             "staff_username": current_user.username,
             "is_admin": is_admin,
-            "total_unique_visitors": total_count,
+            "total_visible_visitors": total_count,
             "page_visitor_count": len(channels),
             "msg_count": msg_count,
             "offset": offset,
