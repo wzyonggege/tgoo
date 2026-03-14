@@ -512,6 +512,7 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
             expected_output=req.expected_output,
             agent_ids=platform_agent_ids,
             started_event=started_event,
+            custom_uid=req.from_uid,
             ai_config=ai_config,
         ))
         
@@ -558,6 +559,7 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
             system_message=req.system_message,
             expected_output=req.expected_output,
             agent_ids=platform_agent_ids,
+            custom_uid=req.from_uid,
             ai_config=ai_config,
         )
         
@@ -596,6 +598,7 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
             system_message=req.system_message,
             expected_output=req.expected_output,
             agent_ids=platform_agent_ids,
+            custom_uid=req.from_uid,
             ai_config=ai_config,
         ):
             event_type = event_payload.get("event_type")
