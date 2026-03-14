@@ -409,6 +409,7 @@ async def sync_my_conversations(
     description="获取当前客服服务过的所有访客会话列表（基于 VisitorSession 表，包括已关闭的会话），支持分页。",
 )
 async def sync_all_conversations(
+    http_request: Request,
     msg_count: int = Query(default=20, ge=1, le=100, description="每个会话返回的最近消息数量"),
     only_completed_recent: bool = Query(
         default=False,
@@ -418,6 +419,7 @@ async def sync_all_conversations(
     offset: int = Query(default=0, ge=0, description="跳过的会话数量"),
     db: Session = Depends(get_db),
     current_user: Staff = Depends(get_current_active_user),
+    user_language: UserLanguage = Depends(get_user_language),
 ) -> WuKongIMConversationWithChannelsPaginatedResponse:
     """
     获取当前客服服务过的所有访客会话（支持分页）。
