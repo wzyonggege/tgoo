@@ -1040,7 +1040,7 @@ async def chat_completion_openai_compatible(
     client_msg_no = f"openai_{uuid4().hex}"
     channel_id_enc = build_visitor_channel_id(visitor.id)
     channel_type = CHANNEL_TYPE_CUSTOMER_SERVICE
-    session_id = get_session_id(f"{visitor.id}-vtr", channel_id_enc, channel_type)
+    session_id = platform_open_id
 
     # 4.2) Forward a copy of user message to WuKongIM (best-effort)
     await chat_service.send_user_message_to_wukongim(
