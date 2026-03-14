@@ -3,6 +3,7 @@ import { useChannelStore } from '@/stores/channelStore';
 import type { ChannelInfo, ChannelExtra } from '@/types';
 import { getChannelKey } from '@/utils/channelUtils';
 import { generateDefaultAvatar, hasValidAvatar, type DefaultAvatar } from '@/utils/avatarUtils';
+import { isAIReplyChannelId, useAIReplyDisplayName } from '@/hooks/useAIReplyDisplayName';
 
 /**
  * Props for useChannelDisplay hook
@@ -72,8 +73,6 @@ export const useChannelDisplay = ({
   overrideAvatar,
   skipFetch = false,
 }: UseChannelDisplayProps): UseChannelDisplayReturn => {
-  // Create stable selector for channel info
-  // This ensures component re-renders when channels[key] changes
   const channelInfoSelector = useCallback(
     (state: ReturnType<typeof useChannelStore.getState>) => {
       if (!channelId || channelType == null) return undefined;
@@ -83,10 +82,8 @@ export const useChannelDisplay = ({
     [channelId, channelType]
   );
 
-  // Subscribe to channel info - will trigger re-render when data is fetched
   const channelInfo = useChannelStore(channelInfoSelector);
 
-  // Subscribe to loading state
   const isLoading = useChannelStore(
     useCallback(
       (state) => {
@@ -98,7 +95,6 @@ export const useChannelDisplay = ({
     )
   );
 
-  // Subscribe to error state
   const hasError = useChannelStore(
     useCallback(
       (state) => {
@@ -110,32 +106,26 @@ export const useChannelDisplay = ({
     )
   );
 
-  // Get ensureChannel action
   const ensureChannel = useChannelStore((state) => state.ensureChannel);
+  const aiReplyDisplayName = useAIReplyDisplayName(channelId);
+  const isAIReplyChannel = isAIReplyChannelId(channelId);
 
-  // Trigger fetch if needed
   useEffect(() => {
-
-    if (skipFetch) return;
+    if (skipFetch || isAIReplyChannel) return;
     if (!channelId || channelType == null) return;
     if (channelInfo || isLoading || hasError) return;
-
 
     ensureChannel({ channel_id: channelId, channel_type: channelType }).catch(() => {
       // Error is stored in channelStore.errors, no need to handle here
     });
-  }, [channelId, channelType, channelInfo, isLoading, hasError, skipFetch, ensureChannel]);
+  }, [channelId, channelType, channelInfo, isLoading, hasError, skipFetch, isAIReplyChannel, ensureChannel]);
 
-  // Compute display values with priority:
-  // 1. Override values (from props, e.g., message.fromInfo)
-  // 2. Channel info from store
-  // 3. Fallback values
   const name = useMemo(() => {
     if (overrideName && overrideName.trim()) return overrideName;
     if (channelInfo?.name) return channelInfo.name;
-    // Fallback: "访客" + last 4 chars of channelId
+    if (aiReplyDisplayName) return aiReplyDisplayName;
     return `访客${(channelId || '').slice(-4)}`;
-  }, [overrideName, channelInfo?.name, channelId]);
+  }, [overrideName, channelInfo?.name, aiReplyDisplayName, channelId]);
 
   const avatar = useMemo(() => {
     if (overrideAvatar && hasValidAvatar(overrideAvatar)) return overrideAvatar;
@@ -146,7 +136,6 @@ export const useChannelDisplay = ({
 
   const defaultAvatar = useMemo(() => {
     if (validAvatar) return null;
-    // Use channelId as colorSeed for consistent avatar color
     return generateDefaultAvatar(name, channelId);
   }, [validAvatar, name, channelId]);
 

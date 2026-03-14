@@ -76,7 +76,9 @@ const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({ activeChat, onBackTo
   const showEndChatButton = !isAIChat && visitorId && serviceStatus === 'active' && isMyVisitor;
   
   // 获取显示名称
-  const displayName = channelName || '';
+  const displayName = isAIReplyChat && channelName
+    ? t('chat.common.aiReplyDisplayName', 'AI 回复 · {{name}}', { name: channelName })
+    : (channelName || '');
 
   // 结束聊天处理
   const handleEndChat = useCallback(async () => {

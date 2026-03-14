@@ -42,7 +42,9 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
   });
 
   // Apply special display names for agent/team chats
-  const displayName = name;
+  const displayName = isAIReplyChat && name
+    ? t('chat.common.aiReplyDisplayName', 'AI 回复 · {{name}}', { name })
+    : name;
   const displayAvatar = avatar;
 
   // Get online status from extra (channel info)
