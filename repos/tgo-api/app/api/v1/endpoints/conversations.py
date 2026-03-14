@@ -34,6 +34,7 @@ from app.schemas.wukongim import (
     WuKongIMConversationSyncRequest,
     WuKongIMConversationSyncResponse,
     WuKongIMConversationWithChannelsResponse,
+    WuKongIMConversationWithChannelsPaginatedResponse,
     WuKongIMDeleteConversationRequest,
     WuKongIMSetUnreadRequest,
 )
@@ -733,8 +734,23 @@ async def sync_waiting_conversations(
         has_next = (offset + limit) < total_count
         has_prev = offset > 0
         
-        return WuKongIMConversationPaginatedResponse(
+        channel_infos = await _build_channels_for_conversations(
+            db=db,
             conversations=conversations,
+            project_id=current_user.project_id,
+            user_language=user_language,
+            accept_language=http_request.headers.get("Accept-Language"),
+            include_closed_and_queued=True,
+        )
+
+        valid_channel_ids = {ch.channel_id for ch in channel_infos}
+        filtered_conversations = [
+            conv for conv in conversations if (conv.channel_type != CHANNEL_TYPE_CUSTOMER_SERVICE) or (conv.channel_id in valid_channel_ids)
+        ]
+
+        return WuKongIMConversationWithChannelsPaginatedResponse(
+            conversations=filtered_conversations,
+            channels=channel_infos,
             pagination=PaginationMetadata(
                 total=total_count,
                 limit=limit,
