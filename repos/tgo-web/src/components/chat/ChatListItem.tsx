@@ -88,6 +88,7 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
   }, [chat.unreadCount]);
 
   const unreadToDisplay = chat.unreadCount > 0 ? chat.unreadCount : prevUnreadRef.current;
+  const hasUnread = unreadToDisplay > 0;
   const tags = (extra as any)?.tags || [];
   return (
     <div
@@ -107,7 +108,7 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
 
       <div className="flex-grow overflow-hidden">
         <div className="flex justify-between items-center">
-          <h3 className={`text-sm font-semibold truncate flex items-center ${isActive ? 'text-white' : 'text-gray-800 dark:text-gray-200'}`}>
+          <h3 className={`text-sm truncate flex items-center ${isActive ? 'text-white' : (hasUnread ? 'text-gray-900 dark:text-white font-bold' : 'text-gray-800 dark:text-gray-200 font-semibold')}`}>
             <span className="truncate">{displayName}</span>
             {isAgentChat || isAIReplyChat ? (
               <Bot className={`w-3.5 h-3.5 ml-1 flex-shrink-0 ${isActive ? 'text-blue-100' : 'text-purple-500 dark:text-purple-400'}`} />
@@ -135,11 +136,11 @@ export const ChatListItem: React.FC<ChatListItemProps> = React.memo(({ chat, isA
         </div>
 
         <div className="flex justify-between items-center mt-1">
-          <p className={`text-xs truncate flex-1 ${isActive ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>
+          <p className={`text-xs truncate flex-1 ${isActive ? 'text-blue-100' : (hasUnread ? 'text-gray-800 dark:text-gray-200 font-medium' : 'text-gray-500 dark:text-gray-400')}`}>
             {formatChatLastMessage(chat, t)}
           </p>
           {(chat.unreadCount > 0 || fadeOut) && (
-            <div className={`min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-medium rounded-full flex items-center justify-center px-1 flex-shrink-0 ml-2 transition-opacity duration-200 ${fadeOut && chat.unreadCount === 0 ? 'opacity-0' : 'opacity-100'}`}>
+            <div className={`min-w-[22px] h-5 bg-red-600 text-white text-[11px] font-bold rounded-full flex items-center justify-center px-1.5 flex-shrink-0 ml-2 shadow-sm ring-2 ${isActive ? 'ring-blue-200/50' : 'ring-white dark:ring-gray-800'} transition-opacity duration-200 ${fadeOut && chat.unreadCount === 0 ? 'opacity-0' : 'opacity-100'} ${chat.unreadCount > 0 ? 'animate-pulse' : ''}`}>
               {unreadToDisplay > 99 ? '99+' : unreadToDisplay}
             </div>
           )}

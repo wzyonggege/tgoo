@@ -28,6 +28,7 @@ export const WebSocketManager: React.FC = () => {
   const appendStreamMessageContent = useChatStore(state => state.appendStreamMessageContent);
   const markStreamMessageEnd = useChatStore(state => state.markStreamMessageEnd);
   const activeChat = useChatStore(state => state.activeChat);
+  const totalUnreadCount = useChatStore(state => state.chats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0));
   
   // Get connection/notification actions from uiStore
   const uiPreferences = useUIStore(state => state.preferences);
@@ -212,6 +213,10 @@ export const WebSocketManager: React.FC = () => {
   /**
    * Connect to WebSocket
    */
+  useEffect(() => {
+    notificationService.updatePageTitle(totalUnreadCount);
+  }, [totalUnreadCount]);
+
   const connect = React.useCallback(async () => {
     if (!token) {
       console.log('🔌 WebSocket Manager: No token available, skipping connection');
