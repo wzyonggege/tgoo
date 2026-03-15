@@ -190,6 +190,59 @@ async def _build_channels_for_conversations(
     return channels
 
 
+
+
+def _build_fallback_conversations_for_visitors(
+    db: Session,
+    project_id: UUID,
+    visitor_ids: List[UUID],
+    existing_conversations: List[WuKongIMConversation],
+) -> List[WuKongIMConversation]:
+    """Ensure every visitor channel has a conversation placeholder even if WuKongIM sync misses it."""
+    if not visitor_ids:
+        return existing_conversations
+
+    existing_map = {
+        (conversation.channel_id, conversation.channel_type): conversation
+        for conversation in existing_conversations
+    }
+
+    visitors = (
+        db.query(Visitor)
+        .filter(
+            Visitor.project_id == project_id,
+            Visitor.id.in_(visitor_ids),
+            Visitor.deleted_at.is_(None),
+        )
+        .all()
+    )
+
+    merged: List[WuKongIMConversation] = list(existing_conversations)
+    for visitor in visitors:
+        channel_id = build_visitor_channel_id(visitor.id)
+        key = (channel_id, CHANNEL_TYPE_CUSTOMER_SERVICE)
+        if key in existing_map:
+            continue
+
+        timestamp_dt = visitor.last_message_at or visitor.last_visit_time or visitor.created_at
+        timestamp = int(timestamp_dt.timestamp()) if timestamp_dt else 0
+        merged.append(
+            WuKongIMConversation(
+                channel_id=channel_id,
+                channel_type=CHANNEL_TYPE_CUSTOMER_SERVICE,
+                unread=0,
+                timestamp=timestamp,
+                last_msg_seq=visitor.last_message_seq or 0,
+                last_client_msg_no=visitor.last_client_msg_no or "",
+                version=0,
+                recents=[],
+            )
+        )
+
+    merged.sort(key=lambda conversation: conversation.timestamp, reverse=True)
+    return merged
+
+
 class WuKongIMConversationPaginatedResponse(BaseModel):
     """Paginated response for WuKongIM conversations."""
     
@@ -260,9 +313,15 @@ async def _sync_project_latest_conversations_for_admin(
         msg_count=msg_count,
     )
 
-    return [
+    normalized_conversations = [
         conv.model_copy(update={"unread": 0}) for conv in raw_conversations
     ]
+    return _build_fallback_conversations_for_visitors(
+        db=db,
+        project_id=current_user.project_id,
+        visitor_ids=visitor_ids,
+        existing_conversations=normalized_conversations,
+    )
 
 
 @router.post(
@@ -433,91 +492,64 @@ async def sync_all_conversations(
     is_admin = current_user.role == StaffRole.ADMIN.value
     
     # 1) Build ordered visitor list for the project-wide "all" tab.
-    # For only_completed_recent=true, keep historical session-based behavior.
     ordered_visitors: list[tuple[UUID, object]] = []
     seen_visitor_ids: set[UUID] = set()
 
-    subquery_base = db.query(
-        VisitorSession.visitor_id,
-        func.max(VisitorSession.created_at).label("latest_created_at")
-    ).filter(
-        VisitorSession.visitor_id.isnot(None),
-        VisitorSession.staff_id.isnot(None),
-    )
-
-    if is_admin or not only_completed_recent:
-        subquery_base = subquery_base.filter(VisitorSession.project_id == current_user.project_id)
-    else:
-        subquery_base = subquery_base.filter(VisitorSession.staff_id == current_user.id)
-
-    latest_session_subquery = subquery_base.group_by(VisitorSession.visitor_id).subquery()
-
-    latest_sessions_query = (
-        db.query(
-            latest_session_subquery.c.visitor_id,
-            latest_session_subquery.c.latest_created_at,
-        )
-        .join(
-            VisitorSession,
-            (VisitorSession.visitor_id == latest_session_subquery.c.visitor_id)
-            & (VisitorSession.created_at == latest_session_subquery.c.latest_created_at)
-            & (VisitorSession.visitor_id.isnot(None))
-            & (VisitorSession.staff_id.isnot(None)),
-        )
-    )
-    if is_admin or not only_completed_recent:
-        latest_sessions_query = latest_sessions_query.filter(VisitorSession.project_id == current_user.project_id)
-    else:
-        latest_sessions_query = latest_sessions_query.filter(VisitorSession.staff_id == current_user.id)
-
-    if only_completed_recent:
-        latest_sessions_query = latest_sessions_query.filter(VisitorSession.status == SessionStatus.CLOSED.value)
-
-    latest_session_rows = (
-        latest_sessions_query
-        .order_by(latest_session_subquery.c.latest_created_at.desc())
-        .all()
-    )
-
-    for visitor_id, latest_created_at in latest_session_rows:
-        if visitor_id and visitor_id not in seen_visitor_ids:
-            seen_visitor_ids.add(visitor_id)
-            ordered_visitors.append((visitor_id, latest_created_at))
-
     if not only_completed_recent:
-        waiting_entries = (
-            db.query(VisitorWaitingQueue)
-            .filter(
-                VisitorWaitingQueue.project_id == current_user.project_id,
-                VisitorWaitingQueue.status == WaitingStatus.WAITING.value,
-                VisitorWaitingQueue.visitor_id.isnot(None),
-            )
-            .order_by(VisitorWaitingQueue.created_at.desc())
-            .all()
-        )
-
-        for entry in waiting_entries:
-            if entry.visitor_id and entry.visitor_id not in seen_visitor_ids:
-                seen_visitor_ids.add(entry.visitor_id)
-                ordered_visitors.append((entry.visitor_id, entry.created_at))
-
-        new_visitors = (
-            db.query(Visitor)
+        visitor_rows = (
+            db.query(Visitor.id, Visitor.last_message_at, Visitor.last_visit_time, Visitor.created_at)
             .filter(
                 Visitor.project_id == current_user.project_id,
                 Visitor.deleted_at.is_(None),
-                Visitor.service_status == VisitorServiceStatus.NEW.value,
             )
-            .order_by(Visitor.last_visit_time.desc(), Visitor.created_at.desc())
+            .order_by(
+                Visitor.last_message_at.desc().nullslast(),
+                Visitor.last_visit_time.desc(),
+                Visitor.created_at.desc(),
+            )
             .all()
         )
 
-        for visitor in new_visitors:
-            if visitor.id not in seen_visitor_ids:
-                seen_visitor_ids.add(visitor.id)
-                ordered_visitors.append((visitor.id, visitor.last_visit_time or visitor.created_at))
+        for visitor_id, last_message_at, last_visit_time, created_at in visitor_rows:
+            sort_value = last_message_at or last_visit_time or created_at
+            if visitor_id and visitor_id not in seen_visitor_ids:
+                seen_visitor_ids.add(visitor_id)
+                ordered_visitors.append((visitor_id, sort_value))
+    else:
+        subquery_base = db.query(
+            VisitorSession.visitor_id,
+            func.max(VisitorSession.created_at).label("latest_created_at")
+        ).filter(
+            VisitorSession.visitor_id.isnot(None),
+            VisitorSession.staff_id.isnot(None),
+        )
+        subquery_base = subquery_base.filter(VisitorSession.staff_id == current_user.id)
 
-    ordered_visitors.sort(key=lambda item: item[1], reverse=True)
+        latest_session_subquery = subquery_base.group_by(VisitorSession.visitor_id).subquery()
+
+        latest_sessions_query = (
+            db.query(
+                latest_session_subquery.c.visitor_id,
+                latest_session_subquery.c.latest_created_at,
+            )
+            .join(
+                VisitorSession,
+                (VisitorSession.visitor_id == latest_session_subquery.c.visitor_id)
+                & (VisitorSession.created_at == latest_session_subquery.c.latest_created_at)
+                & (VisitorSession.visitor_id.isnot(None))
+                & (VisitorSession.staff_id.isnot(None)),
+            )
+            .filter(VisitorSession.staff_id == current_user.id)
+            .filter(VisitorSession.status == SessionStatus.CLOSED.value)
+            .order_by(latest_session_subquery.c.latest_created_at.desc())
+            .all()
+        )
+
+        for visitor_id, latest_created_at in latest_sessions_query:
+            if visitor_id and visitor_id not in seen_visitor_ids:
+                seen_visitor_ids.add(visitor_id)
+                ordered_visitors.append((visitor_id, latest_created_at))
+
     total_count = len(ordered_visitors)
     if total_count == 0:
         logger.debug(f"No sessions found for staff {current_user.username}")
@@ -582,9 +614,14 @@ async def sync_all_conversations(
         )
         
         # 5. Reset unread to 0 for all conversations
-        conversations = [
-            conv.model_copy(update={"unread": 0}) for conv in raw_conversations
-        ]
+        conversations = _build_fallback_conversations_for_visitors(
+            db=db,
+            project_id=current_user.project_id,
+            visitor_ids=visitor_ids,
+            existing_conversations=[
+                conv.model_copy(update={"unread": 0}) for conv in raw_conversations
+            ],
+        )
         
         logger.info(
             f"Successfully fetched {len(conversations)} conversations for staff {current_user.username}",
@@ -753,9 +790,14 @@ async def sync_waiting_conversations(
         )
         
         # 5. Reset unread to 0 for all conversations
-        conversations = [
-            conv.model_copy(update={"unread": 0}) for conv in raw_conversations
-        ]
+        conversations = _build_fallback_conversations_for_visitors(
+            db=db,
+            project_id=current_user.project_id,
+            visitor_ids=visitor_ids,
+            existing_conversations=[
+                conv.model_copy(update={"unread": 0}) for conv in raw_conversations
+            ],
+        )
         
         logger.info(
             f"Successfully fetched {len(conversations)} conversations for unassigned visitors",
