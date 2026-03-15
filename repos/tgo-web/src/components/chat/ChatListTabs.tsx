@@ -11,6 +11,10 @@ interface ChatListTabsProps {
   counts: {
     mine: number;
     unassigned: number;
+    all: number;
+    mineUnread: number;
+    unassignedUnread: number;
+    allUnread: number;
   };
 }
 
@@ -23,13 +27,13 @@ export const ChatListTabs: React.FC<ChatListTabsProps> = ({ activeTab, onTabChan
   const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
 
   const allTabs = useMemo(() => [
-    { key: 'mine' as ChatTabType, label: t('chat.list.tabs.mine', '我的'), count: counts.mine > 0 ? counts.mine : undefined },
-    { key: 'unassigned' as ChatTabType, label: t('chat.list.tabs.unassigned', '未分配'), count: counts.unassigned > 0 ? counts.unassigned : undefined },
-    { key: 'all' as ChatTabType, label: t('chat.list.tabs.all', '全部') },
+    { key: 'mine' as ChatTabType, label: t('chat.list.tabs.mine', '我的'), count: counts.mine > 0 ? counts.mine : undefined, unread: counts.mineUnread > 0 ? counts.mineUnread : undefined },
+    { key: 'unassigned' as ChatTabType, label: t('chat.list.tabs.unassigned', '未分配'), count: counts.unassigned > 0 ? counts.unassigned : undefined, unread: counts.unassignedUnread > 0 ? counts.unassignedUnread : undefined },
+    { key: 'all' as ChatTabType, label: t('chat.list.tabs.all', '全部'), count: counts.all > 0 ? counts.all : undefined, unread: counts.allUnread > 0 ? counts.allUnread : undefined },
     { key: 'recent' as ChatTabType, label: t('chat.list.tabs.recent', '最近在线') },
     { key: 'completed' as ChatTabType, label: t('chat.list.tabs.completed', '已完成') },
     { key: 'manual' as ChatTabType, label: t('chat.list.tabs.manual', '转人工') },
-  ], [t, counts.mine, counts.unassigned]);
+  ], [t, counts.mine, counts.unassigned, counts.all, counts.mineUnread, counts.unassignedUnread, counts.allUnread]);
 
   const visibleTabs = allTabs.slice(0, 3);
   const hiddenTabs = allTabs.slice(3);
@@ -103,6 +107,11 @@ export const ChatListTabs: React.FC<ChatListTabsProps> = ({ activeTab, onTabChan
             {tab.count !== undefined && (
               <span className="text-[11px] tabular-nums text-gray-400 dark:text-gray-500">{tab.count}</span>
             )}
+            {tab.unread !== undefined && (
+              <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center shadow-sm">
+                {tab.unread > 99 ? '99+' : tab.unread}
+              </span>
+            )}
           </button>
         );
       })}
@@ -159,11 +168,18 @@ export const ChatListTabs: React.FC<ChatListTabsProps> = ({ activeTab, onTabChan
               `}
             >
               <span>{tab.label}</span>
-              {tab.count !== undefined && (
-                <span className="text-[11px] tabular-nums bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-full min-w-[18px] text-center ml-2">
-                  {tab.count}
-                </span>
-              )}
+              <span className="flex items-center gap-2 ml-2">
+                {tab.count !== undefined && (
+                  <span className="text-[11px] tabular-nums bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                    {tab.count}
+                  </span>
+                )}
+                {tab.unread !== undefined && (
+                  <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center shadow-sm">
+                    {tab.unread > 99 ? '99+' : tab.unread}
+                  </span>
+                )}
+              </span>
             </button>
           ))}
         </div>,

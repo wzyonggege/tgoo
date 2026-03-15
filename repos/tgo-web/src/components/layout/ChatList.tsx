@@ -849,8 +849,9 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         // 2. 时间戳相同但内容不同（例如流式消息增量更新预览）
         const isNewer = realtimeTimestamp > apiTimestamp;
         const isContentUpdated = realtimeTimestamp === apiTimestamp && realtimeChat.lastMessage !== apiChat.lastMessage;
+        const isUnreadUpdated = (realtimeChat.unreadCount || 0) !== (apiChat.unreadCount || 0);
 
-        if ((isNewer || isContentUpdated) && (realtimeChat.lastMessage || realtimeChat.payloadType === MessagePayloadType.STREAM)) {
+        if ((isNewer || isContentUpdated || isUnreadUpdated) && (realtimeChat.lastMessage || realtimeChat.payloadType === MessagePayloadType.STREAM || isUnreadUpdated)) {
           return {
             ...apiChat,
             lastMessage: realtimeChat.lastMessage,
@@ -982,10 +983,29 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     });
   }, [mineTagInitialized, activeTab, mineTagIds, myChats, realtimeChats, channelInfoRetryTick, tagFilterBypassKeys]);
 
-  // "已完成"会话：仅使用 API 返回结果（不合并实时会话，避免把活跃会话混入“已完成”）
+  // "全部"会话：使用 API 返回结果为主，并用 realtimeChats 覆盖未读数/最后消息等最新状态
   const mergedAllChats = useMemo(() => {
-    return sortChatsByTimestamp(allChats);
-  }, [allChats]);
+    const realtimeChatMap = new Map<string, Chat>();
+    realtimeChats.forEach((chat) => {
+      realtimeChatMap.set(getChannelKey(chat.channelId, chat.channelType), chat);
+    });
+
+    const mergedFromApi = allChats.map((apiChat) => {
+      const key = getChannelKey(apiChat.channelId, apiChat.channelType);
+      const realtimeChat = realtimeChatMap.get(key);
+      if (!realtimeChat) return apiChat;
+
+      const apiSec = apiChat.lastTimestampSec ?? (apiChat.timestamp ? Math.floor(new Date(apiChat.timestamp).getTime() / 1000) : 0);
+      const realtimeSec = realtimeChat.lastTimestampSec ?? (realtimeChat.timestamp ? Math.floor(new Date(realtimeChat.timestamp).getTime() / 1000) : 0);
+      const shouldUseRealtime = realtimeSec >= apiSec || (realtimeChat.unreadCount || 0) !== (apiChat.unreadCount || 0) || realtimeChat.lastMessage !== apiChat.lastMessage;
+      return shouldUseRealtime ? { ...apiChat, ...realtimeChat } : apiChat;
+    });
+
+    const apiChatKeys = new Set(allChats.map((chat) => getChannelKey(chat.channelId, chat.channelType)));
+    const newRealtimeChats = realtimeChats.filter((chat) => !apiChatKeys.has(getChannelKey(chat.channelId, chat.channelType)));
+
+    return sortChatsByTimestamp([...mergedFromApi, ...newRealtimeChats]);
+  }, [allChats, realtimeChats]);
 
   // Get the appropriate chat list based on active tab
   const getChatsForTab = useCallback((): Chat[] => {
@@ -1006,13 +1026,20 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   }, [activeTab, mergedMyChats, unassignedChats, mergedAllChats, completedChats, manualChats]);
 
   // Calculate counts for tabs
-  // "我的" tab 显示会话数量，"未分配" tab 显示等待数量
   const counts = useMemo(() => {
+    const mineUnread = mergedMyChats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0);
+    const unassignedUnread = unassignedChats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0);
+    const allUnread = mergedAllChats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0);
+
     return {
       mine: mergedMyChats.length,
       unassigned: unassignedCount,
+      all: mergedAllChats.length,
+      mineUnread,
+      unassignedUnread,
+      allUnread,
     };
-  }, [mergedMyChats.length, unassignedCount]);
+  }, [mergedMyChats, unassignedChats, mergedAllChats, unassignedCount]);
 
   // Get chats for current tab
   const tabChats = getChatsForTab();

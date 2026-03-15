@@ -435,11 +435,13 @@ export const useChatStore = create<ChatState>()(
               return;
             }
 
-            // 0. Auto-create conversation if not exists (visitor messages only)
+            // 0. Auto-create conversation if not exists for any non-system message
             let createdNewConversation = false;
-            if (message.type === MESSAGE_SENDER_TYPE.VISITOR) {
+            if (message.type !== MESSAGE_SENDER_TYPE.SYSTEM) {
               const key = getChannelKey(channelId, channelType);
-              const platform = WuKongIMUtils.getPlatformFromChannelType(channelType);
+              const platform = channelId?.endsWith('-aireply')
+                ? 'ai_reply'
+                : WuKongIMUtils.getPlatformFromChannelType(channelType);
               const isoTs =
                 message.timestamp && !isNaN(new Date(message.timestamp).getTime())
                   ? new Date(message.timestamp).toISOString()
