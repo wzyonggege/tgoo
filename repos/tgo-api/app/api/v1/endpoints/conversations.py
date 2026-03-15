@@ -313,9 +313,7 @@ async def _sync_project_latest_conversations_for_admin(
         msg_count=msg_count,
     )
 
-    normalized_conversations = [
-        conv.model_copy(update={"unread": 0}) for conv in raw_conversations
-    ]
+    normalized_conversations = list(raw_conversations)
     return _build_fallback_conversations_for_visitors(
         db=db,
         project_id=current_user.project_id,
@@ -618,9 +616,7 @@ async def sync_all_conversations(
             db=db,
             project_id=current_user.project_id,
             visitor_ids=visitor_ids,
-            existing_conversations=[
-                conv.model_copy(update={"unread": 0}) for conv in raw_conversations
-            ],
+            existing_conversations=list(raw_conversations),
         )
         
         logger.info(
@@ -794,9 +790,7 @@ async def sync_waiting_conversations(
             db=db,
             project_id=current_user.project_id,
             visitor_ids=visitor_ids,
-            existing_conversations=[
-                conv.model_copy(update={"unread": 0}) for conv in raw_conversations
-            ],
+            existing_conversations=list(raw_conversations),
         )
         
         logger.info(
@@ -961,7 +955,7 @@ async def sync_recent_conversations_by_visitor_tags(
             channels=channels_req,
             msg_count=msg_count,
         )
-        conversations = [conv.model_copy(update={"unread": 0}) for conv in raw_conversations]
+        conversations = list(raw_conversations)
 
         # Build channels list (include CLOSED/QUEUED visitors as well, keep consistent with /channels/info)
         channel_infos = await _build_channels_for_conversations(
