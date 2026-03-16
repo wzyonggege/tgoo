@@ -66,6 +66,15 @@ from app.utils.encoding import build_visitor_channel_id, parse_visitor_channel_i
 
 router = APIRouter()
 
+AI_ASSISTANT_WUKONG_UID = "ai-assistant-staff"
+
+
+def _should_prefer_ai_reply(platform: Platform, visitor: Visitor) -> bool:
+    """Return whether the conversation should go to AI directly before any staff assignment."""
+    if getattr(visitor, "ai_disabled", None) is True:
+        return False
+    return getattr(platform, "ai_mode", None) == "auto"
+
 
 async def _send_custom_ai_reply_to_platform(
     *,
@@ -367,9 +376,10 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
             extra=req.extra,
         )
 
-    # 3.5) If visitor is unassigned, try to assign staff
+    # 3.5) If visitor is unassigned, only try to assign staff when AI is not preferred
     assigned_staff_id = None
-    if visitor.is_unassigned:
+    prefer_ai_reply = _should_prefer_ai_reply(platform, visitor)
+    if visitor.is_unassigned and not prefer_ai_reply:
         transfer_result = await transfer_to_staff(
             db=db,
             visitor_id=visitor.id,
@@ -418,8 +428,10 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
             channel_type=channel_type,
         )
 
-    # 4) Prepare from_uid for WuKongIM forwarding (must have assigned staff)
-    if assigned_staff_id:
+    # 4) Prepare from_uid for WuKongIM forwarding
+    if prefer_ai_reply:
+        wukongim_from_uid = AI_ASSISTANT_WUKONG_UID
+    elif assigned_staff_id:
         wukongim_from_uid = f"{assigned_staff_id}-staff"
     else:
         # Check if visitor has an open session with assigned staff
@@ -1052,9 +1064,10 @@ async def chat_completion_openai_compatible(
         extra=None,
     )
 
-    # 5) If visitor is unassigned, try to assign staff
+    # 5) If visitor is unassigned, only try to assign staff when AI is not preferred
     assigned_staff_id = None
-    if visitor.is_unassigned:
+    prefer_ai_reply = _should_prefer_ai_reply(platform, visitor)
+    if visitor.is_unassigned and not prefer_ai_reply:
         transfer_result = await transfer_to_staff(
             db=db,
             visitor_id=visitor.id,
@@ -1087,8 +1100,10 @@ async def chat_completion_openai_compatible(
             channel_type=channel_type,
         )
 
-    # 6) Prepare from_uid for WuKongIM forwarding (must have assigned staff)
-    if assigned_staff_id:
+    # 6) Prepare from_uid for WuKongIM forwarding
+    if prefer_ai_reply:
+        wukongim_from_uid = AI_ASSISTANT_WUKONG_UID
+    elif assigned_staff_id:
         wukongim_from_uid = f"{assigned_staff_id}-staff"
     else:
         # Check if visitor has an open session with assigned staff
