@@ -156,6 +156,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   const [myChats, setMyChats] = useState<Chat[]>([]);
   const [unassignedChats, setUnassignedChats] = useState<Chat[]>([]);
   const [allChats, setAllChats] = useState<Chat[]>([]);
+  const [localUnreadOverrides, setLocalUnreadOverrides] = useState<Record<string, number>>({});
   const [completedChats, setCompletedChats] = useState<Chat[]>([]);
   const [manualChats, setManualChats] = useState<Chat[]>([]);
   const [recentVisitors, setRecentVisitors] = useState<VisitorResponse[]>([]);
@@ -759,6 +760,12 @@ const ChatListComponent: React.FC<ChatListProps> = ({
   // 追踪上一次处理的 deletedChatChannel，避免重复处理
   const lastDeletedChannelRef = useRef<string | null>(null);
   
+  useEffect(() => {
+    if (!activeChat || activeTab === 'unassigned') return;
+    const key = getChannelKey(activeChat.channelId, activeChat.channelType);
+    setLocalUnreadOverrides((prev) => (prev[key] === 0 ? prev : { ...prev, [key]: 0 }));
+  }, [activeChat, activeTab]);
+
   // 当 deletedChatChannel 变化时，从本地状态中移除该会话并选中下一个
   useEffect(() => {
     if (deletedChatChannel?.channelId && deletedChatChannel?.channelType != null) {
@@ -794,6 +801,17 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     }
   }, [deletedChatChannel, activeChat, activeTab, onChatSelect]);
   
+  const applyUnreadOverrides = useCallback((chat: Chat): Chat => {
+    const key = getChannelKey(chat.channelId, chat.channelType);
+    const overrideUnread = localUnreadOverrides[key];
+    if (overrideUnread === undefined) return chat;
+    return {
+      ...chat,
+      unreadCount: overrideUnread,
+      priority: overrideUnread > 0 ? CHAT_PRIORITY.HIGH : (chat.priority === CHAT_PRIORITY.HIGH ? CHAT_PRIORITY.NORMAL : chat.priority),
+    };
+  }, [localUnreadOverrides]);
+
   // 合并"我的"会话：API 返回的 + 新消息创建的会话
   // 优先使用 realtimeChats 中的更新数据（包含最新的 lastMessage 和 unreadCount）
   // 但只在 realtimeChats 的数据比 API 的更新时才使用
@@ -881,8 +899,8 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     });
     
     // 合并并排序
-    return sortChatsByTimestamp([...mergedFromApi, ...newRealtimeChats]);
-  }, [myChats, realtimeChats, mineTagIds, tagFilterBypassKeys]);
+    return sortChatsByTimestamp([...mergedFromApi, ...newRealtimeChats].map(applyUnreadOverrides));
+  }, [myChats, realtimeChats, mineTagIds, tagFilterBypassKeys, applyUnreadOverrides]);
 
   // 当开启标签筛选时，实时新会话若缺少 channelInfo.extra.tags，会被隐藏；
   // 这里主动触发“刷新频道信息”来尽快拿到 tags（有限重试，避免无限请求）。
@@ -983,6 +1001,21 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     });
   }, [mineTagInitialized, activeTab, mineTagIds, myChats, realtimeChats, channelInfoRetryTick, tagFilterBypassKeys]);
 
+  useEffect(() => {
+    setLocalUnreadOverrides((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const chat of realtimeChats) {
+        const key = getChannelKey(chat.channelId, chat.channelType)
+        if ((chat.unreadCount || 0) > 0 && next[key] === 0) {
+          delete next[key]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [realtimeChats]);
+
   // "全部"会话：使用 API 返回结果为主，并用 realtimeChats 覆盖未读数/最后消息等最新状态
   const mergedAllChats = useMemo(() => {
     const realtimeChatMap = new Map<string, Chat>();
@@ -1004,8 +1037,8 @@ const ChatListComponent: React.FC<ChatListProps> = ({
     const apiChatKeys = new Set(allChats.map((chat) => getChannelKey(chat.channelId, chat.channelType)));
     const newRealtimeChats = realtimeChats.filter((chat) => !apiChatKeys.has(getChannelKey(chat.channelId, chat.channelType)));
 
-    return sortChatsByTimestamp([...mergedFromApi, ...newRealtimeChats]);
-  }, [allChats, realtimeChats]);
+    return sortChatsByTimestamp([...mergedFromApi, ...newRealtimeChats].map(applyUnreadOverrides));
+  }, [allChats, realtimeChats, applyUnreadOverrides]);
 
   // Get the appropriate chat list based on active tab
   const getChatsForTab = useCallback((): Chat[] => {
@@ -1079,6 +1112,8 @@ const ChatListComponent: React.FC<ChatListProps> = ({
       // Update local state for the appropriate tab
       setMyChats(updateChatUnread);
       setAllChats(updateChatUnread);
+      const key = getChannelKey(chat.channelId, chat.channelType);
+      setLocalUnreadOverrides((prev) => ({ ...prev, [key]: 0 }));
     }
     
     // Call parent handler

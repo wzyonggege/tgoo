@@ -497,6 +497,7 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
     # Update visitor last message stats
     visitor.is_last_message_from_ai = True
     visitor.is_last_message_from_visitor = False
+    visitor.last_message_at = datetime.utcnow()
     visitor.last_client_msg_no = response_client_msg_no
     db.add(visitor)
     db.commit()
@@ -1150,6 +1151,7 @@ async def chat_completion_openai_compatible(
     # Update visitor last message stats
     visitor.is_last_message_from_ai = True
     visitor.is_last_message_from_visitor = False
+    visitor.last_message_at = datetime.utcnow()
     visitor.last_client_msg_no = response_client_msg_no
     db.add(visitor)
     db.commit()
