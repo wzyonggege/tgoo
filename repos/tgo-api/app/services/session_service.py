@@ -83,6 +83,7 @@ async def close_visitor_session(
     visitor = session.visitor
     if visitor:
         visitor.service_status = VisitorServiceStatus.CLOSED.value
+        visitor.ai_disabled = None
         visitor.updated_at = datetime.utcnow()
     
     if auto_commit:

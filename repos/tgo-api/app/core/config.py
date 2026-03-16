@@ -175,7 +175,7 @@ class Settings(BaseSettings):
         gt=0,
     )
     SESSION_DEFAULT_TIMEOUT_HOURS: int = Field(
-        default=48,
+        default=6,
         description="Default session timeout in hours if not configured in VisitorAssignmentRule",
         gt=0,
     )
@@ -208,7 +208,7 @@ class Settings(BaseSettings):
         gt=0,
     )
     ASSIGNMENT_RULE_DEFAULT_AUTO_CLOSE_HOURS: int = Field(
-        default=48,
+        default=6,
         description="Default auto-close hours for sessions",
         gt=0,
     )

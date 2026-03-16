@@ -675,8 +675,9 @@ async def get_or_create_visitor(
         # 重置已关闭的访客状态
         if visitor.service_status == VisitorServiceStatus.CLOSED.value:
             visitor.service_status = VisitorServiceStatus.NEW.value
+            visitor.ai_disabled = None
             changed = True
-            logger.debug(f"Reset visitor {visitor.id} status from CLOSED to NEW")
+            logger.debug(f"Reset visitor {visitor.id} status from CLOSED to NEW and restore AI default")
 
         if changed:
             visitor.updated_at = datetime.utcnow()

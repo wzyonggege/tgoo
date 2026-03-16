@@ -91,8 +91,8 @@ class VisitorAssignmentRule(Base):
     auto_close_hours: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
-        default=48,
-        comment="Auto close chat after N hours of inactivity (e.g., 48 hours)",
+        default=6,
+        comment="Auto close chat after N hours of inactivity (e.g., 6 hours)",
     )
     queue_wait_timeout_minutes: Mapped[Optional[int]] = mapped_column(
         Integer,

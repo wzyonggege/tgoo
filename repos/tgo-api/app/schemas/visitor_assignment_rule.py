@@ -72,10 +72,10 @@ class VisitorAssignmentRuleBase(BaseSchema):
         description="Maximum concurrent chats per staff member (1-100)"
     )
     auto_close_hours: Optional[int] = Field(
-        default=48,
+        default=6,
         ge=1,
         le=720,
-        description="Auto close chat after N hours of inactivity (1-720, default 48)"
+        description="Auto close chat after N hours of inactivity (1-720, default 6)"
     )
 
     @field_validator("service_weekdays")
