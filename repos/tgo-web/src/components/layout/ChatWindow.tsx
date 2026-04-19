@@ -13,10 +13,22 @@ import { useAppSettingsStore } from '@/stores/appSettingsStore';
 import type { Chat, Message, ChannelVisitorExtra } from '@/types';
 import { PlatformType, MessagePayloadType } from '@/types';
 import { chatMessagesApiService } from '@/services/chatMessagesApi';
+import { APIError } from '@/services/api';
 import { useToast } from '@/hooks/useToast';
-import { showApiError } from '@/utils/toastHelpers';
+import { showApiError, showWarning } from '@/utils/toastHelpers';
 import { useTranslation } from 'react-i18next';
 import { WsSendError } from '@/services/wukongimWebSocket';
+
+const isPlatformTimeoutError = (error: unknown): boolean => {
+  if (error instanceof APIError) {
+    const message = error.getUserMessage().toLowerCase();
+    return error.status === 504 || message.includes('platform service timeout');
+  }
+  if (error instanceof Error) {
+    return error.message.toLowerCase().includes('platform service timeout');
+  }
+  return false;
+};
 
 /**
  * Props for the ChatWindow component
@@ -238,10 +250,16 @@ const ChatWindow: React.FC<ChatWindowProps> = React.memo(({
               client_msg_no: nowId,
             });
           } catch (e: any) {
-            console.error(t('chat.send.platformErrorLog', '\u5e73\u53f0\u6d88\u606f\u53d1\u9001\u5931\u8d25'), e);
-            const apiMsg = e?.message || t('chat.send.platformError', '\u5e73\u53f0\u6d88\u606f\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5');
-            updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: apiMsg } as any });
-            throw new Error(apiMsg);
+            if (isPlatformTimeoutError(e)) {
+              const warningMsg = t('chat.send.platformTimeoutDelivered', '平台回执超时，消息可能已送达，已先保存会话记录');
+              updateMessageByClientMsgNo(nowId, { metadata: { platform_send_timeout: true, warning_text: warningMsg } as any });
+              showWarning(showToast, t('chat.send.platformTimeoutTitle', '平台回执超时'), warningMsg);
+            } else {
+              console.error(t('chat.send.platformErrorLog', '\u5e73\u53f0\u6d88\u606f\u53d1\u9001\u5931\u8d25'), e);
+              const apiMsg = e?.message || t('chat.send.platformError', '\u5e73\u53f0\u6d88\u606f\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5');
+              updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: apiMsg } as any });
+              throw new Error(apiMsg);
+            }
           }
         }
         // Send via WebSocket (with dedicated error handling)

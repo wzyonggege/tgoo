@@ -15,7 +15,7 @@ import { conversationsApi } from '@/services/conversationsApi';
 import { staffApi } from '@/services/staffApi';
 import { useToast } from '@/hooks/useToast';
 import { useAIReplyOptions } from '@/hooks/useAIReplyDisplayName';
-import { showApiError, showSuccess } from '@/utils/toastHelpers';
+import { showApiError, showSuccess, showWarning } from '@/utils/toastHelpers';
 import Toggle from '@/components/ui/Toggle';
 import EmojiPickerPopover from '@/components/chat/EmojiPickerPopover';
 import { uploadChatImageWithProgress, uploadChatFileWithProgress } from '@/services/chatUploadApi';
@@ -55,6 +55,17 @@ const getErrorMessage = (
     return t(fallbackKey, fallbackDefault);
   }
   return '上传失败';
+};
+
+const isPlatformTimeoutError = (error: unknown): boolean => {
+  if (error instanceof APIError) {
+    const message = error.getUserMessage().toLowerCase();
+    return error.status === 504 || message.includes('platform service timeout');
+  }
+  if (error instanceof Error) {
+    return error.message.toLowerCase().includes('platform service timeout');
+  }
+  return false;
 };
 
 interface SlashTokenMatch {
@@ -1155,10 +1166,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 client_msg_no: nowId,
               });
             } catch (err) {
-              const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
-              updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
-              showApiError(showToast, err);
-              return;
+              if (isPlatformTimeoutError(err)) {
+                const warningMsg = t('chat.input.warnings.platformTimeoutDelivered', '平台回执超时，消息可能已送达，已先保存会话记录');
+                updateMessageByClientMsgNo(nowId, { metadata: { platform_send_timeout: true, warning_text: warningMsg } });
+                showWarning(showToast, t('chat.input.warnings.platformTimeoutTitle', '平台回执超时'), warningMsg);
+              } else {
+                const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
+                updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
+                showApiError(showToast, err);
+                return;
+              }
             }
           }
           if (!isConnected) throw new Error(t('chat.input.errors.websocketNotConnected.image', 'WebSocket 未连接，无法发送图片消息'));
@@ -1262,10 +1279,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 client_msg_no: nowId,
               });
             } catch (err) {
-              const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
-              updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
-              showApiError(showToast, err);
-              return;
+              if (isPlatformTimeoutError(err)) {
+                const warningMsg = t('chat.input.warnings.platformTimeoutDelivered', '平台回执超时，消息可能已送达，已先保存会话记录');
+                updateMessageByClientMsgNo(nowId, { metadata: { platform_send_timeout: true, warning_text: warningMsg } });
+                showWarning(showToast, t('chat.input.warnings.platformTimeoutTitle', '平台回执超时'), warningMsg);
+              } else {
+                const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
+                updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
+                showApiError(showToast, err);
+                return;
+              }
             }
           }
           if (!isConnected) throw new Error(t('chat.input.errors.websocketNotConnected.file', 'WebSocket 未连接，无法发送文件消息'));
@@ -1373,10 +1396,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
               client_msg_no: nowId,
             });
           } catch (err) {
-            const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
-            updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
-            showApiError(showToast, err);
-            return;
+            if (isPlatformTimeoutError(err)) {
+              const warningMsg = t('chat.input.warnings.platformTimeoutDelivered', '平台回执超时，消息可能已送达，已先保存会话记录');
+              updateMessageByClientMsgNo(nowId, { metadata: { platform_send_timeout: true, warning_text: warningMsg } });
+              showWarning(showToast, t('chat.input.warnings.platformTimeoutTitle', '平台回执超时'), warningMsg);
+            } else {
+              const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
+              updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
+              showApiError(showToast, err);
+              return;
+            }
           }
         }
         if (!isConnected) throw new Error(t('chat.input.errors.websocketNotConnected.message', 'WebSocket 未连接，无法发送消息'));
@@ -1491,10 +1520,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
             client_msg_no: nowId,
           });
         } catch (err) {
-          const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
-          updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
-          showApiError(showToast, err);
-          return;
+          if (isPlatformTimeoutError(err)) {
+            const warningMsg = t('chat.input.warnings.platformTimeoutDelivered', '平台回执超时，消息可能已送达，已先保存会话记录');
+            updateMessageByClientMsgNo(nowId, { metadata: { platform_send_timeout: true, warning_text: warningMsg } });
+            showWarning(showToast, t('chat.input.warnings.platformTimeoutTitle', '平台回执超时'), warningMsg);
+          } else {
+            const errMsg = err instanceof Error ? err.message : t('chat.input.errors.platformFailed', '平台消息发送失败，请稍后重试');
+            updateMessageByClientMsgNo(nowId, { metadata: { platform_send_error: true, error_text: errMsg } });
+            showApiError(showToast, err);
+            return;
+          }
         }
       }
       if (!isConnected) throw new Error(t('chat.input.errors.websocketNotConnected.richText', 'WebSocket 未连接，无法发送图文消息'));
