@@ -28,6 +28,7 @@ async def telegram_send_text(
     bot_token: str,
     chat_id: str,
     text: str,
+    message_thread_id: int | None = None,
     parse_mode: str | None = None,
     timeout: int | None = None,
 ) -> dict[str, Any]:
@@ -52,7 +53,8 @@ async def telegram_send_text(
         "chat_id": chat_id,
         "text": text[:4096],  # Telegram text limit
     }
-    
+    if message_thread_id is not None:
+        payload["message_thread_id"] = message_thread_id
     if parse_mode:
         payload["parse_mode"] = parse_mode
 
@@ -77,6 +79,7 @@ async def telegram_send_photo(
     chat_id: str,
     photo: str | bytes,
     caption: str | None = None,
+    message_thread_id: int | None = None,
     parse_mode: str | None = None,
     timeout: int | None = None,
 ) -> dict[str, Any]:
@@ -98,6 +101,8 @@ async def telegram_send_photo(
     data: dict[str, Any] = {
         "chat_id": chat_id,
     }
+    if message_thread_id is not None:
+        data["message_thread_id"] = str(message_thread_id)
     if caption:
         data["caption"] = caption[:1024]
     if parse_mode:
@@ -200,6 +205,96 @@ async def telegram_get_me(
         response = await client.get(url)
         response.raise_for_status()
         return response.json()
+
+
+async def telegram_get_chat(
+    bot_token: str,
+    chat_id: str,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    """Get chat details from Telegram Bot API."""
+    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/getChat"
+    timeout_seconds = timeout or settings.request_timeout_seconds
+
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        response = await client.get(url, params={"chat_id": chat_id})
+        response.raise_for_status()
+        return response.json()
+
+
+async def telegram_get_updates(
+    bot_token: str,
+    offset: int = 0,
+    limit: int = 100,
+    timeout_seconds: int = 0,
+    allowed_updates: list[str] | None = None,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    """Fetch updates from Telegram Bot API.
+
+    This is mainly used for discovery or polling scenarios.
+    """
+    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/getUpdates"
+    request_timeout = timeout or max(settings.request_timeout_seconds, timeout_seconds + 3)
+    params: dict[str, Any] = {
+        "offset": offset,
+        "limit": max(1, min(limit, 100)),
+        "timeout": max(0, timeout_seconds),
+    }
+    if allowed_updates:
+        params["allowed_updates"] = allowed_updates
+
+    async with httpx.AsyncClient(timeout=request_timeout) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+
+
+async def telegram_create_forum_topic(
+    bot_token: str,
+    chat_id: str,
+    name: str,
+    timeout: int | None = None,
+) -> int:
+    """Create a Telegram forum topic and return message_thread_id."""
+    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/createForumTopic"
+    timeout_seconds = timeout or settings.request_timeout_seconds
+
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        response = await client.post(url, json={"chat_id": chat_id, "name": name[:128]})
+        response.raise_for_status()
+        result = response.json()
+
+    if not result.get("ok"):
+        raise RuntimeError(result.get("description", "Telegram createForumTopic failed"))
+
+    topic = result.get("result") or {}
+    message_thread_id = topic.get("message_thread_id")
+    if not isinstance(message_thread_id, int):
+        raise RuntimeError("Telegram createForumTopic missing message_thread_id")
+    return message_thread_id
+
+
+async def telegram_is_chat_admin(
+    bot_token: str,
+    chat_id: str,
+    user_id: str,
+    timeout: int | None = None,
+) -> bool:
+    """Return whether the user is a chat administrator/creator."""
+    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/getChatMember"
+    timeout_seconds = timeout or settings.request_timeout_seconds
+
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        response = await client.get(url, params={"chat_id": chat_id, "user_id": user_id})
+        response.raise_for_status()
+        result = response.json()
+
+    if not result.get("ok"):
+        return False
+
+    member = result.get("result") or {}
+    return member.get("status") in {"administrator", "creator"}
 
 
 async def telegram_set_webhook(

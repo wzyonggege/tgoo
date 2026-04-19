@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import String, func
+from sqlalchemy import Boolean, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -29,6 +29,30 @@ class Project(Base):
         unique=True,
         nullable=False,
         comment="API key for authentication"
+    )
+    bridge_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        comment="Whether project-level Telegram bridge relay is enabled",
+    )
+    bridge_bot_token: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Independent Telegram bridge bot token for this project",
+    )
+    bridge_chat_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Telegram bridge target group chat ID",
+    )
+    bridge_admin_only: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+        comment="Whether only Telegram administrators can reply via bridge",
     )
 
     # Timestamps

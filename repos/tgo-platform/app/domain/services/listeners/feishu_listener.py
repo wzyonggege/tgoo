@@ -21,6 +21,7 @@ from app.db.models import Platform, FeishuInbox
 from app.domain.entities import NormalizedMessage
 from app.domain.ports import MessageNormalizer, TgoApiClient, SSEManager
 from app.domain.services.dispatcher import process_message
+from app.domain.services.telegram_bridge import TelegramBridgeService
 from app.infra.visitor_client import VisitorService
 from app.api.feishu_utils import feishu_get_user_info, feishu_extract_sender_info_from_event
 
@@ -72,6 +73,7 @@ class FeishuChannelListener:
             cache_ttl_seconds=300,
             redis_url=settings.redis_url,
         )
+        self._bridge_service = TelegramBridgeService(session_factory)
 
     async def start(self) -> None:
         if self._consumer_task is None or self._consumer_task.done():
@@ -343,6 +345,17 @@ class FeishuChannelListener:
                     # Visitor retrieval/registration with cache-first approach
                     visitor, display_name, avatar_url = await self._get_or_register_visitor(p, rec)
                     self._attach_profile_to_extra(mapped_raw, display_name, avatar_url)
+                    await self._bridge_service.enqueue_inbound(
+                        project_id=p.project_id,
+                        source_platform_id=p.id,
+                        source_platform_api_key=p.api_key,
+                        source_platform_type="feishu_bot",
+                        from_uid=rec.from_user,
+                        content=rec.content or "",
+                        extra=mapped_raw.get("extra"),
+                        dedupe_key=f"{p.id}:feishu:{rec.message_id}",
+                        display_name=display_name,
+                    )
 
                     # Normalize and process
                     msg: NormalizedMessage = await self._normalizer.normalize(mapped_raw)
@@ -358,4 +371,3 @@ class FeishuChannelListener:
                 except Exception as e:
                     # Finalize failure with retry increment
                     await self._finalize_failure(db, p, rec, e)
-

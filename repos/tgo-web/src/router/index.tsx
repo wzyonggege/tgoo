@@ -32,6 +32,7 @@ import NotificationSettings from '../components/settings/NotificationSettings';
 import AboutSettings from '../components/settings/AboutSettings';
 import ProviderSettings from '../components/settings/ProviderSettings';
 import ShortcutsSettings from '../components/settings/ShortcutsSettings';
+import BridgeSettings from '../components/settings/BridgeSettings';
 import MarkdownTestPage from '../pages/MarkdownTestPage';
 
 // Import SaaS routes if they exist (will be resolved via Vite alias or empty default)
@@ -84,6 +85,7 @@ export const router = createBrowserRouter([
               { path: 'general', element: <GeneralSettings /> },
               { path: 'notifications', element: <NotificationSettings /> },
               { path: 'shortcuts', element: <ShortcutsSettings /> },
+              { path: 'bridge', element: <BridgeSettings /> },
               { path: 'staff', element: <StaffSettings /> },
               { path: 'providers', element: <ProviderSettings /> },
               { path: 'about', element: <AboutSettings /> },

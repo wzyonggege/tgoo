@@ -2,26 +2,36 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, NavLink } from 'react-router-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
-import { FiSettings, FiCpu, FiUsers, FiUser, FiBell, FiMessageSquare } from 'react-icons/fi';
+import { FiSettings, FiCpu, FiUsers, FiUser, FiBell, FiMessageSquare, FiShuffle } from 'react-icons/fi';
 import SettingsSidebar from '@/components/settings/SettingsSidebar';
+import { useAuthStore } from '@/stores/authStore';
 
 const SettingsLayout: React.FC = () => {
   const { t } = useTranslation();
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin');
 
-  const items: Array<{ id: string; label: string }> = [
+  const allItems: Array<{ id: string; label: string }> = [
     { id: 'profile', label: t('settings.menu.profile', '个人资料') },
     { id: 'general', label: t('settings.menu.general', '通用') },
     { id: 'notifications', label: t('settings.menu.notifications', '消息通知') },
     { id: 'shortcuts', label: t('settings.menu.shortcuts', '快捷回复') },
+    { id: 'bridge', label: t('settings.menu.bridge', 'Telegram 中继') },
     { id: 'staff', label: t('settings.menu.staff', '人工坐席') },
     { id: 'providers', label: t('settings.menu.providers', 'AI回复接入') },
   ];
+  const items = allItems.filter((item) => {
+    if (!isAdmin && (item.id === 'staff' || item.id === 'providers' || item.id === 'bridge')) {
+      return false;
+    }
+    return true;
+  });
 
   const iconMap: Record<string, React.ReactNode> = {
     profile: <FiUser className="w-4 h-4" />,
     general: <FiSettings className="w-4 h-4" />,
     notifications: <FiBell className="w-4 h-4" />,
     shortcuts: <FiMessageSquare className="w-4 h-4" />,
+    bridge: <FiShuffle className="w-4 h-4" />,
     staff: <FiUsers className="w-4 h-4" />,
     providers: <FiCpu className="w-4 h-4" />,
   };

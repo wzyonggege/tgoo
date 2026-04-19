@@ -15,6 +15,7 @@ from app.db.models import Platform, WeComInbox
 from app.domain.entities import NormalizedMessage
 from app.domain.ports import MessageNormalizer, TgoApiClient, SSEManager
 from app.domain.services.dispatcher import process_message
+from app.domain.services.telegram_bridge import TelegramBridgeService
 from app.infra.visitor_client import VisitorService
 from app.api.wecom_utils import get_wecom_visitor_profile
 
@@ -68,6 +69,7 @@ class WeComChannelListener:
             cache_ttl_seconds=300,
             redis_url=settings.redis_url,
         )
+        self._bridge_service = TelegramBridgeService(session_factory)
 
     async def start(self) -> None:
         if self._consumer_task is None or self._consumer_task.done():
@@ -431,6 +433,17 @@ class WeComChannelListener:
                     # Unified visitor retrieval/registration with cache-first + optional profile
                     visitor, display_name, avatar_url = await self._get_or_register_visitor(p, rec)
                     self._attach_profile_to_extra(mapped_raw, display_name, avatar_url)
+                    await self._bridge_service.enqueue_inbound(
+                        project_id=p.project_id,
+                        source_platform_id=p.id,
+                        source_platform_api_key=p.api_key,
+                        source_platform_type=p.platform_type,
+                        from_uid=rec.from_user,
+                        content=rec.content or "",
+                        extra=mapped_raw.get("extra"),
+                        dedupe_key=f"{p.id}:wecom:{rec.source_type}:{rec.message_id}",
+                        display_name=display_name,
+                    )
 
                     # Normalize and process
                     msg: NormalizedMessage = await self._normalizer.normalize(mapped_raw)

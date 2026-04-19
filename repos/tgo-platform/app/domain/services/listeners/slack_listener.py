@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
 from app.db.models import Platform
+from app.domain.services.telegram_bridge import TelegramBridgeService
 
 
 class SlackPlatformConfig(BaseModel):
@@ -65,9 +66,12 @@ class SlackChannelListener:
         self._stop_event = asyncio.Event()
         self._socket_handlers: dict[uuid.UUID, Any] = {}  # Platform ID -> SocketModeHandler
         self._handler_threads: dict[uuid.UUID, threading.Thread] = {}
+        self._bridge_service = TelegramBridgeService(session_factory)
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
         """Start Socket Mode handlers for all active Slack platforms."""
+        self._loop = asyncio.get_running_loop()
         platforms = await self._load_active_slack_platforms()
         print(f"[SLACK] Starting listeners for {len(platforms)} platforms")
 
@@ -348,6 +352,31 @@ class SlackChannelListener:
                     }
                 }
             }
+            if self._loop is not None:
+                bridge_extra = {
+                    "project_id": str(platform.project_id),
+                    "msg_type": msg_type,
+                    "slack": {
+                        "channel": channel,
+                        "ts": ts,
+                        "thread_ts": thread_ts,
+                    },
+                }
+                future = asyncio.run_coroutine_threadsafe(
+                    self._bridge_service.enqueue_inbound(
+                        project_id=platform.project_id,
+                        source_platform_id=platform.id,
+                        source_platform_api_key=platform.api_key,
+                        source_platform_type="slack",
+                        from_uid=user_id,
+                        content=content,
+                        extra=bridge_extra,
+                        dedupe_key=f"{platform.id}:slack:{channel}:{ts}",
+                        display_name=display_name,
+                    ),
+                    self._loop,
+                )
+                future.add_done_callback(lambda fut: fut.exception())
 
             try:
                 resp = requests.post(

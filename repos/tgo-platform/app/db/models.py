@@ -339,6 +339,84 @@ class TelegramInbox(Base):
     )
 
 
+class TelegramBridgeBinding(Base):
+    """Mapping between a source conversation and a Telegram forum topic."""
+
+    __tablename__ = "pt_telegram_bridge_binding"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    source_platform_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pt_platforms.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    source_platform_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_from_uid: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    telegram_chat_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    topic_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "source_key", name="uq_tg_bridge_binding_project_source"),
+        UniqueConstraint("project_id", "topic_id", name="uq_tg_bridge_binding_project_topic"),
+    )
+
+
+class TelegramBridgeOutbox(Base):
+    """Async outbox for forwarding source messages into Telegram topics."""
+
+    __tablename__ = "pt_telegram_bridge_outbox"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    binding_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pt_telegram_bridge_binding.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    dedupe_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    payload_text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "dedupe_key", name="uq_tg_bridge_outbox_project_dedupe"),
+        Index("ix_tg_bridge_outbox_project_status", "project_id", "status"),
+        Index("ix_tg_bridge_outbox_status_fetched", "status", "fetched_at"),
+    )
+
+
+class TelegramBridgeState(Base):
+    """Persistent offset state for project-level Telegram bridge bot polling."""
+
+    __tablename__ = "pt_telegram_bridge_state"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    last_update_id: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class SlackInbox(Base):
     """Inbound Slack messages stored for async processing pipeline.
 
@@ -385,4 +463,3 @@ class SlackInbox(Base):
         Index("ix_slack_inbox_platform_status", "platform_id", "status"),
         Index("ix_slack_inbox_status_fetched", "status", "fetched_at"),
     )
-

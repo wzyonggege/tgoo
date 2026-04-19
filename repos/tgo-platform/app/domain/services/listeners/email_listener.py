@@ -25,6 +25,7 @@ from app.db.models import Platform, EmailInbox
 from app.domain.entities import NormalizedMessage
 from app.domain.ports import MessageNormalizer, TgoApiClient, SSEManager
 from app.domain.services.dispatcher import process_message
+from app.domain.services.telegram_bridge import TelegramBridgeService
 from app.core.config import settings
 from app.infra.visitor_client import VisitorService
 
@@ -121,6 +122,7 @@ class EmailChannelListener:
             redis_url=settings.redis_url,
             cache_ttl_seconds=settings.visitor_cache_ttl_seconds,
         )
+        self._bridge_service = TelegramBridgeService(session_factory)
 
     async def start(self) -> None:
         """Start producer (IMAP fetch) supervisor and consumer processing loop."""
@@ -583,6 +585,17 @@ class EmailChannelListener:
                             "from_name": sender_name,
                         },
                     }
+                    await self._bridge_service.enqueue_inbound(
+                        project_id=p.project_id,
+                        source_platform_id=p.id,
+                        source_platform_api_key=p.api_key,
+                        source_platform_type="email",
+                        from_uid=from_addr,
+                        content=content_for_chat,
+                        extra=mapped_raw.get("extra"),
+                        dedupe_key=f"{p.id}:email:{rec.message_id}",
+                        display_name=sender_name,
+                    )
 
                     # Visitor registration
                     visitor = None

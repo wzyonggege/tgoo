@@ -39,6 +39,11 @@ from app.schemas.platform_schema import (
     PlatformUpdate,
 )
 from app.schemas.project import (
+    ProjectBridgeChatCandidate,
+    ProjectBridgeChatProbeRequest,
+    ProjectBridgeChatProbeResponse,
+    ProjectBridgeConfigResponse,
+    ProjectBridgeConfigUpdate,
     ProjectCreate,
     ProjectInDB,
     ProjectListResponse,
@@ -210,9 +215,14 @@ __all__ = [
     # Project schemas
     "ProjectCreate",
     "ProjectUpdate",
+    "ProjectBridgeChatProbeRequest",
+    "ProjectBridgeChatCandidate",
+    "ProjectBridgeChatProbeResponse",
+    "ProjectBridgeConfigUpdate",
     "ProjectInDB",
     "ProjectResponse",
     "ProjectListResponse",
+    "ProjectBridgeConfigResponse",
     # Quick reply schemas
     "QuickReplyCreate",
     "QuickReplyUpdate",

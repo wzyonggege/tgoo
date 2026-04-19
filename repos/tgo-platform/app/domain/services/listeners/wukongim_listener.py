@@ -16,6 +16,7 @@ from app.db.models import Platform, WuKongIMInbox
 from app.domain.entities import NormalizedMessage
 from app.domain.ports import MessageNormalizer, TgoApiClient, SSEManager
 from app.domain.services.dispatcher import process_message
+from app.domain.services.telegram_bridge import TelegramBridgeService
 from app.infra.visitor_client import VisitorService
 
 
@@ -62,6 +63,7 @@ class WuKongIMChannelListener:
             cache_ttl_seconds=300,
             redis_url=settings.redis_url,
         )
+        self._bridge_service = TelegramBridgeService(session_factory)
 
     async def start(self) -> None:
         if self._consumer_task is None or self._consumer_task.done():
@@ -187,6 +189,17 @@ class WuKongIMChannelListener:
                         },
                     }
 
+                    await self._bridge_service.enqueue_inbound(
+                        project_id=p.project_id,
+                        source_platform_id=p.id,
+                        source_platform_api_key=p.api_key,
+                        source_platform_type="website",
+                        from_uid=rec.from_uid,
+                        content=content,
+                        extra=mapped_raw.get("extra"),
+                        dedupe_key=f"{p.id}:wukongim:{rec.message_id or rec.client_msg_no or rec.message_seq}",
+                    )
+
                     # WuKongIM: no visitor registration; from_uid is the visitor id
 
                     msg: NormalizedMessage = await self._normalizer.normalize(mapped_raw)
@@ -209,4 +222,3 @@ class WuKongIMChannelListener:
                     rec.retry_count = int((rec.retry_count or 0)) + 1
                     rec.error_message = str(e)[:2000]
                     await db.commit()
-
