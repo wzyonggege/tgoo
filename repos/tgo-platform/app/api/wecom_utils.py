@@ -375,7 +375,12 @@ async def resolve_visitor_platform_open_id(visitor_id: str) -> str:
     return platform_open_id
 
 
-async def resolve_wecom_open_kfid(visitor_id: str, platform_id, db: AsyncSession) -> str:
+async def resolve_wecom_open_kfid(
+    visitor_id: str,
+    platform_id,
+    db: AsyncSession,
+    platform_open_id: str | None = None,
+) -> str:
     """Resolve WeCom open_kfid for a visitor on a platform with Redis caching.
 
     Cache key: wecom:visitor:{visitor_id}:open_kfid
@@ -395,11 +400,11 @@ async def resolve_wecom_open_kfid(visitor_id: str, platform_id, db: AsyncSession
         except Exception as e:
             logging.warning("[RESOLVE] Redis get failed for %s: %s", cache_key, e)
 
-    platform_open_id = await resolve_visitor_platform_open_id(vid)
+    resolved_platform_open_id = (platform_open_id or "").strip() or await resolve_visitor_platform_open_id(vid)
 
     stmt = (
         select(WeComInbox.open_kfid)
-        .where(WeComInbox.platform_id == platform_id, WeComInbox.from_user == platform_open_id)
+        .where(WeComInbox.platform_id == platform_id, WeComInbox.from_user == resolved_platform_open_id)
         .order_by(WeComInbox.received_at.desc(), WeComInbox.fetched_at.desc())
         .limit(1)
     )
@@ -583,4 +588,3 @@ async def sync_kf_messages(
         )
         if not has_more:
             break
-

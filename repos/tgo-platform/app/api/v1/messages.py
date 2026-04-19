@@ -64,6 +64,7 @@ class SendMessageRequest(BaseModel):
     from_uid: str = Field(..., description="Sender user id (for logging)")
     channel_id: str = Field(..., description="Channel id in format '{visitor_id}-vtr'")
     channel_type: int = Field(..., description="Channel type (e.g., 251)")
+    platform_open_id: Optional[str] = Field(None, description="Resolved visitor id on the third-party platform")
     payload: dict = Field(..., description="Message payload (see formats)")
     client_msg_no: Optional[str] = Field(None, description="Client-provided idempotency key")
 
@@ -95,6 +96,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
     # Extract visitor_id from channel_id
     channel_id = req_body.channel_id or ""
     visitor_id = channel_id[:-4] if channel_id.endswith("-vtr") else channel_id
+    resolved_platform_open_id = (req_body.platform_open_id or "").strip()
 
     # Resolve helpers via shared utils (Redis + DB)
 
@@ -119,10 +121,10 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
             # value is guaranteed to match the actual platform row.
             platform_api_key_value = platform.api_key or req_body.platform_api_key
 
-            # Extract platform_open_id from request body
-            platform_open_id = req_body.payload.get("platform_open_id") if isinstance(req_body.payload, dict) else None
+            platform_open_id = resolved_platform_open_id
+            if not platform_open_id and isinstance(req_body.payload, dict):
+                platform_open_id = str(req_body.payload.get("platform_open_id") or "").strip()
             if not platform_open_id:
-                # Try to resolve from visitor_id if not in payload
                 try:
                     platform_open_id = await resolve_visitor_platform_open_id(visitor_id)
                 except Exception:
@@ -168,8 +170,13 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
 
             access_token = await wecom_get_access_token(corp_id, app_secret)
             # Resolve destination
-            external_userid = await resolve_visitor_platform_open_id(visitor_id)
-            open_kfid = await resolve_wecom_open_kfid(visitor_id, platform.id, db)
+            external_userid = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
+            open_kfid = await resolve_wecom_open_kfid(
+                visitor_id,
+                platform.id,
+                db,
+                platform_open_id=external_userid,
+            )
 
             if msg_type == 1:
                 # Text
@@ -215,7 +222,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
 
         if platform_type == "email":
             # Resolve target email address for visitor
-            target_email = await resolve_visitor_platform_open_id(visitor_id)
+            target_email = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
             # SMTP config: from per-platform configuration
             smtp_host = cfg.get("smtp_host")
             smtp_port = int(cfg.get("smtp_port", 587))
@@ -255,7 +262,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                 )
             
             # Resolve target chat_id for visitor
-            chat_id = await resolve_visitor_platform_open_id(visitor_id)
+            chat_id = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
             if not chat_id:
                 return error_response(
                     status.HTTP_400_BAD_REQUEST,
@@ -357,7 +364,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                 )
             
             # Resolve target user_id/channel for visitor
-            target_id = await resolve_visitor_platform_open_id(visitor_id)
+            target_id = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
             if not target_id:
                 return error_response(
                     status.HTTP_400_BAD_REQUEST,

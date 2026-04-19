@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import time
 from email.message import EmailMessage
 from typing import Optional
 import asyncio
@@ -72,6 +73,10 @@ class EmailAdapter(BasePlatformAdapter):
         # Avoid dumping full message content in stdout; keep debug concise
         logging.debug("Preparing to send email via SMTP host=%s port=%s tls=%s to=%s", self.smtp_host, self.smtp_port, self.smtp_use_tls, self.to_addr)
 
+        await asyncio.to_thread(self._send_message_blocking, msg)
+
+    def _send_message_blocking(self, msg: EmailMessage) -> None:
+        """Perform SMTP network I/O off the event loop."""
         # Robust connection with retries and proper TLS/SSL handling
         attempts = 2
         last_err: Exception | None = None
@@ -123,7 +128,7 @@ class EmailAdapter(BasePlatformAdapter):
                 except Exception:
                     pass
                 if attempt < attempts:
-                    await asyncio.sleep(1.5)
+                    time.sleep(1.5)
 
         # If we reached here, all attempts failed
         raise RuntimeError(f"Failed to send email after {attempts} attempts: {last_err}")
@@ -149,4 +154,3 @@ class EmailAdapter(BasePlatformAdapter):
         paras = [p.strip() for p in esc.split("\n\n")]
         html_paras = [p.replace("\n", "<br>\n") for p in paras]
         return "\n\n".join(f"<p>{p}</p>" for p in html_paras)
-
