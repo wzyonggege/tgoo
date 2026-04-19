@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from fastapi import APIRouter, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +70,48 @@ class SendMessageRequest(BaseModel):
     client_msg_no: Optional[str] = Field(None, description="Client-provided idempotency key")
 
 
+async def _deliver_custom_platform_callback(
+    *,
+    callback_url: str,
+    custom_payload: dict[str, object],
+    client_msg_no: str,
+    request_id: str | None,
+) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.post(callback_url, json=custom_payload)
+            response.raise_for_status()
+        logging.info(
+            "[SEND] client_msg_no=%s custom platform callback delivered to %s request_id=%s",
+            client_msg_no,
+            callback_url,
+            request_id,
+        )
+    except httpx.TimeoutException:
+        logging.warning(
+            "[SEND] client_msg_no=%s custom platform callback timed out to %s request_id=%s",
+            client_msg_no,
+            callback_url,
+            request_id,
+        )
+    except httpx.HTTPStatusError as exc:
+        logging.warning(
+            "[SEND] client_msg_no=%s custom platform callback returned HTTP %s from %s request_id=%s",
+            client_msg_no,
+            exc.response.status_code,
+            callback_url,
+            request_id,
+        )
+    except httpx.RequestError as exc:
+        logging.warning(
+            "[SEND] client_msg_no=%s custom platform callback request error to %s request_id=%s error=%s",
+            client_msg_no,
+            callback_url,
+            request_id,
+            exc,
+        )
+
+
 @router.post(
     "/v1/messages/send",
     responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
@@ -135,7 +178,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
             client_msg_no_generated = req_body.client_msg_no or str(uuid.uuid4())
 
             # Build request payload
-            custom_payload = {
+            custom_payload: dict[str, object] = {
                 "platform_api_key": platform_api_key_value,
                 "message_id": message_id,
                 "channel_id": req_body.channel_id,
@@ -145,21 +188,26 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                 "payload": req_body.payload,
             }
 
-            # Send POST request to callback URL
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                response = await client.post(callback_url, json=custom_payload)
-                response.raise_for_status()
-
+            asyncio.create_task(
+                _deliver_custom_platform_callback(
+                    callback_url=callback_url,
+                    custom_payload=custom_payload,
+                    client_msg_no=client_msg_no_generated,
+                    request_id=request_id,
+                )
+            )
             logging.info(
-                "[SEND] client_msg_no=%s custom platform message sent to %s",
+                "[SEND] client_msg_no=%s custom platform callback queued to %s request_id=%s",
                 client_msg_no_generated,
-                callback_url
+                callback_url,
+                request_id,
             )
             return {
                 "ok": True,
                 "client_msg_no": client_msg_no_generated,
                 "message_id": message_id,
-                "message": "Message sent successfully to custom platform"
+                "message": "Message accepted for asynchronous delivery to custom platform",
+                "callback_status": "queued",
             }
 
         if platform_type == "wecom":
