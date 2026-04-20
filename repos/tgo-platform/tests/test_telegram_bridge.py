@@ -105,7 +105,7 @@ class TelegramBridgeHelperTests(unittest.TestCase):
             content="hello",
             platform_name="测试渠道",
         )
-        self.assertIn("[测试渠道] Alice", text)
+        self.assertIn("👤 [测试渠道] Alice", text)
         self.assertIn("ID: u_1", text)
         self.assertTrue(text.endswith("hello"))
 
@@ -121,7 +121,7 @@ class TelegramBridgeHelperTests(unittest.TestCase):
         )
         self.assertEqual(payload.kind, "image")
         self.assertEqual(payload.media_url, "https://example.com/a.jpg")
-        self.assertIn("[测试渠道] Alice", payload.caption or "")
+        self.assertIn("👤 [测试渠道] Alice", payload.caption or "")
 
     def test_build_outbound_payload_marks_staff_image(self) -> None:
         payload = _deserialize_payload(
@@ -133,7 +133,7 @@ class TelegramBridgeHelperTests(unittest.TestCase):
         )
         self.assertEqual(payload.kind, "image")
         self.assertEqual(payload.media_url, "https://example.com/b.png")
-        self.assertEqual(payload.caption, "[客服]")
+        self.assertEqual(payload.caption, "💁 [客服]")
 
 
 if __name__ == "__main__":

@@ -100,6 +100,19 @@ def _bridge_platform_label(platform_type: str, extra: dict[str, Any] | None = No
     return _display_platform_name(platform_type)
 
 
+def _inbound_sender_emoji() -> str:
+    return "👤"
+
+
+def _outbound_sender_emoji(sender_label: str) -> str:
+    normalized = str(sender_label or "").strip().lower()
+    if normalized == "ai":
+        return "🤖"
+    if normalized == "客服":
+        return "💁"
+    return "💬"
+
+
 def _copy_jsonable(value: dict[str, Any] | None) -> dict[str, Any]:
     if not value:
         return {}
@@ -219,12 +232,12 @@ def _format_bridge_text(
     platform_name: str | None = None,
 ) -> str:
     label = str(platform_name or "").strip() or _display_platform_name(platform_type)
-    header = f"[{label}] {(display_name or from_uid).strip()}"
+    header = f"{_inbound_sender_emoji()} [{label}] {(display_name or from_uid).strip()}"
     return f"{header}\nID: {from_uid}\n\n{_compact_text(content)}"
 
 
 def _format_outbound_bridge_text(sender_label: str, content: str) -> str:
-    return f"[{sender_label}]\n\n{_compact_text(content)}"
+    return f"{_outbound_sender_emoji(sender_label)} [{sender_label}]\n\n{_compact_text(content)}"
 
 
 def _serialize_payload(payload: _BridgePayloadEnvelope) -> str:
@@ -253,7 +266,7 @@ def _build_inbound_payload(
     extra: dict[str, Any],
 ) -> str:
     platform_label = _bridge_platform_label(platform_type, extra)
-    header = f"[{platform_label}] {(display_name or from_uid).strip()}\nID: {from_uid}"
+    header = f"{_inbound_sender_emoji()} [{platform_label}] {(display_name or from_uid).strip()}\nID: {from_uid}"
     msg_type = _extract_msg_type(extra)
     if msg_type == 2 and _looks_like_image_url(content):
         return _serialize_payload(
@@ -288,7 +301,7 @@ def _build_outbound_payload(
             _BridgePayloadEnvelope(
                 kind="image",
                 media_url=content.strip(),
-                caption=f"[{sender_label}]",
+                caption=f"{_outbound_sender_emoji(sender_label)} [{sender_label}]",
             )
         )
     return _serialize_payload(
