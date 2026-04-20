@@ -17,10 +17,12 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 ENV CI=true
+ARG YARN_REGISTRY=https://registry.npmjs.org
 
 # Install deps
 COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+RUN yarn config set registry "${YARN_REGISTRY}" \
+    && yarn install --frozen-lockfile --network-timeout 600000
 
 # Build (no VITE_* variables needed at build time - they're configured at runtime)
 COPY . .

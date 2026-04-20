@@ -4,6 +4,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 ENV CI=true
+ARG YARN_REGISTRY=https://registry.npmjs.org
 
 # Build-time envs for Vite (must be defined BEFORE build)
 # Note: These are no longer used for API_BASE, which is now runtime-configurable
@@ -11,7 +12,8 @@ ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+RUN yarn config set registry "${YARN_REGISTRY}" \
+    && yarn install --frozen-lockfile --network-timeout 600000
 
 COPY . .
 RUN echo "Building with VITE_API_BASE_URL=${VITE_API_BASE_URL}" && yarn build
@@ -35,4 +37,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD curl 
 
 # Use entrypoint script to generate runtime config and start Nginx
 ENTRYPOINT ["/docker-entrypoint.sh"]
-
