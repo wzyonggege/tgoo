@@ -22,6 +22,8 @@ ARG YARN_REGISTRY=https://registry.npmjs.org
 # Install deps
 COPY package.json yarn.lock ./
 RUN yarn config set registry "${YARN_REGISTRY}" \
+    && sed -i 's#https://registry.yarnpkg.com/#https://registry.npmjs.org/#g' yarn.lock \
+    && yarn config set network-concurrency 1 \
     && yarn install --frozen-lockfile --network-timeout 600000
 
 # Build (no VITE_* variables needed at build time - they're configured at runtime)

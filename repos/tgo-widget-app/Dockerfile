@@ -13,6 +13,8 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 COPY package.json yarn.lock ./
 RUN yarn config set registry "${YARN_REGISTRY}" \
+    && sed -i 's#https://registry.yarnpkg.com/#https://registry.npmjs.org/#g' yarn.lock \
+    && yarn config set network-concurrency 1 \
     && yarn install --frozen-lockfile --network-timeout 600000
 
 COPY . .
