@@ -20,6 +20,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -67,6 +68,14 @@ from app.utils.encoding import build_visitor_channel_id, parse_visitor_channel_i
 router = APIRouter()
 
 AI_ASSISTANT_WUKONG_UID = "ai-assistant-staff"
+TELEGRAM_BRIDGE_OPERATOR_UID = "telegram-bridge-operator-bridge"
+
+class BridgeReplyMirrorRequest(BaseModel):
+    source_platform_id: UUID | None = Field(None, description="Source platform id for safety check")
+    platform_open_id: str | None = Field(None, description="Source visitor identifier on the channel platform")
+    channel_id: str | None = Field(None, description="Resolved customer service channel id if already known")
+    channel_type: int = Field(CHANNEL_TYPE_CUSTOMER_SERVICE, description="Target WuKongIM channel type")
+    content: str = Field(..., description="Bridge reply content")
 
 
 def _should_prefer_ai_reply(platform: Platform, visitor: Visitor) -> bool:
@@ -74,6 +83,62 @@ def _should_prefer_ai_reply(platform: Platform, visitor: Visitor) -> bool:
     if getattr(visitor, "ai_disabled", None) is True:
         return False
     return getattr(platform, "ai_mode", None) == "auto"
+
+
+def _get_platform_from_bridge_api_key(
+    db: Session,
+    *,
+    platform_api_key: str,
+) -> Platform:
+    platform = (
+        db.query(Platform)
+        .filter(
+            Platform.api_key == platform_api_key,
+            Platform.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if platform is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid platform_api_key",
+        )
+    return platform
+
+
+def _resolve_bridge_channel_id(
+    db: Session,
+    *,
+    platform: Platform,
+    channel_id: str | None,
+    platform_open_id: str | None,
+) -> str:
+    if str(channel_id or "").strip():
+        return str(channel_id).strip()
+
+    platform_open_id_text = str(platform_open_id or "").strip()
+    if not platform_open_id_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing channel_id or platform_open_id",
+        )
+
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.project_id == platform.project_id,
+            Visitor.platform_id == platform.id,
+            Visitor.platform_open_id == platform_open_id_text,
+            Visitor.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if visitor is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Visitor not found for bridge reply",
+        )
+    return build_visitor_channel_id(visitor.id)
 
 
 async def _send_custom_ai_reply_to_platform(
@@ -755,6 +820,68 @@ async def staff_send_platform_message(
     passthrough_headers = {k: v for k, v in resp.headers.items() if k.lower() not in hop_by_hop}
     media_type = resp.headers.get("content-type")
     return Response(content=resp.content, status_code=resp.status_code, headers=passthrough_headers, media_type=media_type)
+
+
+@router.post(
+    "/bridge-replies/internal",
+    include_in_schema=False,
+)
+async def mirror_bridge_reply_internal(
+    req: BridgeReplyMirrorRequest,
+    db: Session = Depends(get_db),
+    x_platform_api_key: str | None = Header(None, alias="X-Platform-API-Key"),
+) -> dict[str, str | bool]:
+    """Mirror Telegram bridge replies into the backoffice message stream."""
+    api_key = str(x_platform_api_key or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing platform_api_key",
+        )
+
+    platform = _get_platform_from_bridge_api_key(db, platform_api_key=api_key)
+    if req.source_platform_id is not None and req.source_platform_id != platform.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform does not match source platform",
+        )
+
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bridge reply content is required",
+        )
+
+    channel_id = _resolve_bridge_channel_id(
+        db,
+        platform=platform,
+        channel_id=req.channel_id,
+        platform_open_id=req.platform_open_id,
+    )
+
+    await wukongim_client.send_message(
+        payload={
+            "type": int(MessageType.TEXT),
+            "content": content,
+            "extra": {
+                "bridge": {
+                    "source": "telegram",
+                    "kind": "operator",
+                }
+            },
+        },
+        from_uid=TELEGRAM_BRIDGE_OPERATOR_UID,
+        channel_id=channel_id,
+        channel_type=req.channel_type,
+        client_msg_no=f"tgbridge_{uuid4().hex}",
+    )
+
+    return {
+        "ok": True,
+        "channel_id": channel_id,
+        "from_uid": TELEGRAM_BRIDGE_OPERATOR_UID,
+    }
 
 
 @router.post("/upload", response_model=ChatFileUploadResponse, tags=["Chat"])

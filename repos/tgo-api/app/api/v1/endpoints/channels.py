@@ -35,6 +35,8 @@ STAFF_SUFFIX = "-staff"
 AGENT_SUFFIX = "-agent"
 TEAM_SUFFIX = "-team"
 VISITOR_SUFFIX = "-vtr"
+BRIDGE_SUFFIX = "-bridge"
+TELEGRAM_BRIDGE_OPERATOR_UID = "telegram-bridge-operator-bridge"
 
 
 class ChannelInfoResponse(BaseModel):
@@ -42,8 +44,8 @@ class ChannelInfoResponse(BaseModel):
     avatar: str = Field(..., description="Channel avatar URL")
     channel_id: str = Field(..., description="WuKongIM channel identifier")
     channel_type: int = Field(..., description="Channel type: 1 (personal), 251 (customer service)")
-    entity_type: Literal["visitor", "staff", "agent", "team"] = Field(
-        ..., description="Entity type represented by this channel: 'visitor', 'staff', 'agent', or 'team'"
+    entity_type: Literal["visitor", "staff", "agent", "team", "bridge"] = Field(
+        ..., description="Entity type represented by this channel: 'visitor', 'staff', 'agent', 'team', or 'bridge'"
     )
     extra: Optional[Dict[str, Any]] = Field(
         None,
@@ -226,6 +228,25 @@ def _build_staff_channel_response(
         channel_type=channel_type,
         entity_type="staff",
         extra=extra,
+    )
+
+
+def _build_bridge_channel_response(
+    channel_id: str,
+    channel_type: int,
+) -> ChannelInfoResponse:
+    """Build channel response for bridge operator identity."""
+    return ChannelInfoResponse(
+        name="Telegram 管理员",
+        avatar="",
+        channel_id=channel_id,
+        channel_type=channel_type,
+        entity_type="bridge",
+        extra={
+            "bridge_id": TELEGRAM_BRIDGE_OPERATOR_UID,
+            "kind": "telegram_bridge",
+            "role": "operator",
+        },
     )
 
 
@@ -458,6 +479,9 @@ async def _handle_staff_auth_channel_info(
                 project_id=current_user.project_id,
             )
 
+        if channel_id.endswith(BRIDGE_SUFFIX):
+            return _build_bridge_channel_response(channel_id, channel_type)
+
         # Visitor channel (with -vtr suffix)
         if channel_id.endswith(VISITOR_SUFFIX):
             return _get_personal_visitor_channel_info(
@@ -490,15 +514,16 @@ async def _handle_platform_auth_channel_info(
     user_language: UserLanguage = "en",
 ) -> ChannelInfoResponse:
     """Handle channel info request for Platform API key authentication."""
-    # Only allow channel_type==1 and channel_id ending with '-staff', '-agent', or '-team'
+    # Only allow channel_type==1 and channel_id ending with '-staff', '-agent', '-team', or '-bridge'
     is_staff_channel = channel_type == 1 and channel_id.endswith(STAFF_SUFFIX)
     is_agent_channel = channel_type == 1 and channel_id.endswith(AGENT_SUFFIX)
     is_team_channel = channel_type == 1 and channel_id.endswith(TEAM_SUFFIX)
+    is_bridge_channel = channel_type == 1 and channel_id.endswith(BRIDGE_SUFFIX)
 
-    if not (is_staff_channel or is_agent_channel or is_team_channel):
+    if not (is_staff_channel or is_agent_channel or is_team_channel or is_bridge_channel):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only staff, agent, and team personal channels are accessible with platform API key",
+            detail="Only staff, agent, team, and bridge personal channels are accessible with platform API key",
             )
 
     if is_staff_channel:
@@ -540,6 +565,9 @@ async def _handle_platform_auth_channel_info(
             channel_type=channel_type,
             project_id=platform.project_id,
         )
+
+    if is_bridge_channel:
+        return _build_bridge_channel_response(channel_id, channel_type)
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported channel type")
 

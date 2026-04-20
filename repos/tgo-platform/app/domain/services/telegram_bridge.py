@@ -4,10 +4,12 @@ import asyncio
 import hashlib
 import httpx
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from typing import Any
 
 from pydantic import BaseModel
@@ -18,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.telegram_utils import (
     telegram_create_forum_topic,
     telegram_is_chat_admin,
+    telegram_send_photo,
     telegram_send_text,
 )
 from app.core.config import settings
@@ -27,6 +30,7 @@ from app.domain.services.dispatcher import select_adapter_for_target
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
 _BRIDGE_FALLBACK_TEXT = "[unsupported message type]"
+logger = logging.getLogger(__name__)
 _PLATFORM_LABELS: dict[str, str] = {
     "email": "Email",
     "wecom": "WeCom",
@@ -56,6 +60,14 @@ class ProjectBridgeConfig(BaseModel):
     bridge_bot_token: str | None = None
     bridge_chat_id: str | None = None
     bridge_admin_only: bool = True
+
+
+class _BridgePayloadEnvelope(BaseModel):
+    kind: str = "text"
+    text: str | None = None
+    media_url: str | None = None
+    caption: str | None = None
+    legacy_text: bool = False
 
 
 @dataclass
@@ -91,6 +103,37 @@ def _sanitize_extra(extra: dict[str, Any] | None) -> dict[str, Any]:
     cleaned.pop("visitor_profile", None)
     cleaned.pop("system_message", None)
     return cleaned
+
+
+def _looks_like_image_url(value: str | None) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    return True
+
+
+def _extract_msg_type(extra: dict[str, Any]) -> int | None:
+    raw_msg_type = extra.get("msg_type")
+    if isinstance(raw_msg_type, int):
+        return raw_msg_type
+    if isinstance(raw_msg_type, str) and raw_msg_type.isdigit():
+        return int(raw_msg_type)
+    return None
+
+
+def _extract_bridge_channel_id(extra: dict[str, Any]) -> str | None:
+    channel_id = str(extra.get("channel_id") or "").strip()
+    return channel_id or None
+
+
+def _extract_bridge_platform_open_id(extra: dict[str, Any], fallback_uid: str) -> str:
+    direct = str(extra.get("platform_open_id") or "").strip()
+    if direct:
+        return direct
+    return fallback_uid
 
 
 def _source_key(platform_type: str, platform_id: uuid.UUID | str, from_uid: str, extra: dict[str, Any]) -> str:
@@ -167,6 +210,80 @@ def _format_bridge_text(
 ) -> str:
     header = f"[{_display_platform_name(platform_type)}] {(display_name or from_uid).strip()}"
     return f"{header}\nID: {from_uid}\n\n{_compact_text(content)}"
+
+
+def _format_outbound_bridge_text(sender_label: str, content: str) -> str:
+    return f"[{sender_label}]\n\n{_compact_text(content)}"
+
+
+def _serialize_payload(payload: _BridgePayloadEnvelope) -> str:
+    return payload.model_dump_json(exclude_none=True)
+
+
+def _deserialize_payload(raw_payload: str) -> _BridgePayloadEnvelope:
+    try:
+        data = json.loads(raw_payload)
+    except Exception:
+        return _BridgePayloadEnvelope(kind="text", text=raw_payload, legacy_text=True)
+    if not isinstance(data, dict) or "kind" not in data:
+        return _BridgePayloadEnvelope(kind="text", text=raw_payload, legacy_text=True)
+    try:
+        return _BridgePayloadEnvelope(**data)
+    except Exception:
+        return _BridgePayloadEnvelope(kind="text", text=raw_payload, legacy_text=True)
+
+
+def _build_inbound_payload(
+    *,
+    platform_type: str,
+    display_name: str | None,
+    from_uid: str,
+    content: str,
+    extra: dict[str, Any],
+) -> str:
+    header = f"[{_display_platform_name(platform_type)}] {(display_name or from_uid).strip()}\nID: {from_uid}"
+    msg_type = _extract_msg_type(extra)
+    if msg_type == 2 and _looks_like_image_url(content):
+        return _serialize_payload(
+            _BridgePayloadEnvelope(
+                kind="image",
+                media_url=content.strip(),
+                caption=header,
+            )
+        )
+    return _serialize_payload(
+        _BridgePayloadEnvelope(
+            kind="text",
+            text=_format_bridge_text(
+                platform_type=platform_type,
+                display_name=display_name,
+                from_uid=from_uid,
+                content=content,
+            ),
+        )
+    )
+
+
+def _build_outbound_payload(
+    *,
+    sender_label: str,
+    content: str,
+    msg_type: int = 1,
+) -> str:
+    if msg_type == 2 and _looks_like_image_url(content):
+        return _serialize_payload(
+            _BridgePayloadEnvelope(
+                kind="image",
+                media_url=content.strip(),
+                caption=f"[{sender_label}]",
+            )
+        )
+    return _serialize_payload(
+        _BridgePayloadEnvelope(
+            kind="text",
+            text=_format_outbound_bridge_text(sender_label, content),
+        )
+    )
 
 
 def _extract_update_message(update: dict[str, Any]) -> dict[str, Any] | None:
@@ -274,11 +391,12 @@ class TelegramBridgeService:
                 extra=cleaned_extra,
             )
 
-            payload_text = _format_bridge_text(
+            payload_text = _build_inbound_payload(
                 platform_type=source_platform_type,
                 display_name=display_name,
                 from_uid=from_uid,
                 content=content,
+                extra=cleaned_extra,
             )
             outbox = TelegramBridgeOutbox(
                 project_id=project_id,
@@ -291,6 +409,92 @@ class TelegramBridgeService:
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
+
+    async def enqueue_outbound_mirror(
+        self,
+        *,
+        project_id: uuid.UUID,
+        source_platform_id: uuid.UUID,
+        source_platform_api_key: str | None,
+        source_platform_type: str,
+        from_uid: str,
+        extra: dict[str, Any] | None,
+        dedupe_key: str,
+        sender_label: str,
+        content: str,
+        msg_type: int = 1,
+    ) -> None:
+        cleaned_extra = _sanitize_extra(extra)
+        source_key = _source_key(source_platform_type, source_platform_id, from_uid, cleaned_extra)
+
+        async with self._session_factory() as session:
+            bridge_project = await self._load_bridge_project(
+                project_id=project_id,
+                platform_api_key=source_platform_api_key,
+            )
+            if bridge_project is None:
+                return
+
+            binding = await self._find_binding_for_outbound(
+                session=session,
+                project_id=project_id,
+                source_platform_id=source_platform_id,
+                source_key=source_key,
+                from_uid=from_uid,
+            )
+            if binding is None:
+                logger.info(
+                    "[TELEGRAM_BRIDGE] skip outbound mirror: binding not found project=%s platform=%s from_uid=%s",
+                    project_id,
+                    source_platform_id,
+                    from_uid,
+                )
+                return
+
+            outbox = TelegramBridgeOutbox(
+                project_id=project_id,
+                binding_id=binding.id,
+                dedupe_key=dedupe_key,
+                payload_text=_build_outbound_payload(
+                    sender_label=sender_label,
+                    content=content,
+                    msg_type=msg_type,
+                ),
+            )
+            session.add(outbox)
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+
+    async def _find_binding_for_outbound(
+        self,
+        *,
+        session: AsyncSession,
+        project_id: uuid.UUID,
+        source_platform_id: uuid.UUID,
+        source_key: str,
+        from_uid: str,
+    ) -> TelegramBridgeBinding | None:
+        binding = await session.scalar(
+            select(TelegramBridgeBinding).where(
+                TelegramBridgeBinding.project_id == project_id,
+                TelegramBridgeBinding.source_key == source_key,
+            )
+        )
+        if binding is not None:
+            return binding
+
+        return await session.scalar(
+            select(TelegramBridgeBinding)
+            .where(
+                TelegramBridgeBinding.project_id == project_id,
+                TelegramBridgeBinding.source_platform_id == source_platform_id,
+                TelegramBridgeBinding.source_from_uid == from_uid,
+            )
+            .order_by(TelegramBridgeBinding.last_message_at.desc().nullslast())
+            .limit(1)
+        )
 
     async def route_topic_reply(
         self,
@@ -339,6 +543,13 @@ class TelegramBridgeService:
             )
             adapter = await select_adapter_for_target(msg, platform=source_platform)
             await adapter.send_final({"text": reply_text})
+            asyncio.create_task(
+                self._mirror_topic_reply_to_backoffice(
+                    source_platform=source_platform,
+                    binding=binding,
+                    reply_text=reply_text,
+                )
+            )
 
             binding.last_message_at = datetime.now(timezone.utc)
             await session.commit()
@@ -466,6 +677,48 @@ class TelegramBridgeService:
             if existing is None:
                 raise
             return existing
+
+    async def _mirror_topic_reply_to_backoffice(
+        self,
+        *,
+        source_platform: Platform,
+        binding: TelegramBridgeBinding,
+        reply_text: str,
+    ) -> None:
+        platform_api_key = str(source_platform.api_key or "").strip()
+        if not platform_api_key:
+            return
+
+        extra = _sanitize_extra(binding.source_extra)
+        channel_id = _extract_bridge_channel_id(extra)
+        platform_open_id = _extract_bridge_platform_open_id(extra, binding.source_from_uid)
+        url = f"{settings.api_base_url.rstrip('/')}/v1/chat/bridge-replies/internal"
+
+        try:
+            async with httpx.AsyncClient(timeout=2.5) as client:
+                response = await client.post(
+                    url,
+                    json={
+                        "source_platform_id": str(source_platform.id),
+                        "platform_open_id": platform_open_id,
+                        "channel_id": channel_id,
+                        "channel_type": 251,
+                        "content": reply_text,
+                    },
+                    headers={"X-Platform-API-Key": platform_api_key},
+                )
+            if response.status_code >= 400:
+                logger.warning(
+                    "[TELEGRAM_BRIDGE] mirror topic reply failed: platform=%s status=%s body=%s",
+                    source_platform.id,
+                    response.status_code,
+                    response.text[:500],
+                )
+        except Exception:
+            logger.exception(
+                "[TELEGRAM_BRIDGE] mirror topic reply exception for platform=%s",
+                source_platform.id,
+            )
 
 
 class TelegramBridgeWorker:
@@ -635,12 +888,23 @@ class TelegramBridgeWorker:
             binding.topic_name = topic_name
             await session.commit()
 
-        await telegram_send_text(
-            bot_token=project.cfg.bot_token,
-            chat_id=str(project.cfg.bridge_chat_id or ""),
-            text=record.payload_text,
-            message_thread_id=int(binding.topic_id),
-        )
+        payload = _deserialize_payload(record.payload_text)
+        if payload.kind == "image" and payload.media_url:
+            await telegram_send_photo(
+                bot_token=project.cfg.bot_token,
+                chat_id=str(project.cfg.bridge_chat_id or ""),
+                photo=payload.media_url,
+                caption=(payload.caption or "")[:1024] or None,
+                message_thread_id=int(binding.topic_id),
+            )
+        else:
+            text = payload.text or record.payload_text
+            await telegram_send_text(
+                bot_token=project.cfg.bot_token,
+                chat_id=str(project.cfg.bridge_chat_id or ""),
+                text=text,
+                message_thread_id=int(binding.topic_id),
+            )
 
         record.status = "completed"
         record.error_message = None

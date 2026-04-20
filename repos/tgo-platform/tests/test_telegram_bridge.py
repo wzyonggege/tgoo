@@ -1,6 +1,9 @@
 import unittest
 
 from app.domain.services.telegram_bridge import (
+    _build_inbound_payload,
+    _build_outbound_payload,
+    _deserialize_payload,
     _format_bridge_text,
     _sanitize_extra,
     _source_key,
@@ -74,6 +77,32 @@ class TelegramBridgeHelperTests(unittest.TestCase):
         self.assertIn("[Telegram] Alice", text)
         self.assertIn("ID: u_1", text)
         self.assertTrue(text.endswith("hello"))
+
+    def test_build_inbound_payload_uses_photo_for_image_url(self) -> None:
+        payload = _deserialize_payload(
+            _build_inbound_payload(
+                platform_type="telegram",
+                display_name="Alice",
+                from_uid="u_1",
+                content="https://example.com/a.jpg",
+                extra={"msg_type": 2},
+            )
+        )
+        self.assertEqual(payload.kind, "image")
+        self.assertEqual(payload.media_url, "https://example.com/a.jpg")
+        self.assertIn("[Telegram] Alice", payload.caption or "")
+
+    def test_build_outbound_payload_marks_staff_image(self) -> None:
+        payload = _deserialize_payload(
+            _build_outbound_payload(
+                sender_label="客服",
+                content="https://example.com/b.png",
+                msg_type=2,
+            )
+        )
+        self.assertEqual(payload.kind, "image")
+        self.assertEqual(payload.media_url, "https://example.com/b.png")
+        self.assertEqual(payload.caption, "[客服]")
 
 
 if __name__ == "__main__":

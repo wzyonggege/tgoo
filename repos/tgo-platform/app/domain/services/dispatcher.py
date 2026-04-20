@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import hashlib
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,31 @@ from app.domain.services.adapters import (
     SlackAdapter,
     CustomPlatformAdapter,
 )
+
+
+async def _mirror_ai_reply_async(msg: NormalizedMessage, platform: Platform, text: str) -> None:
+    stripped = (text or "").strip()
+    if not stripped:
+        return
+    try:
+        from app.db.base import SessionLocal
+        from app.domain.services.telegram_bridge import TelegramBridgeService
+
+        bridge_service = TelegramBridgeService(SessionLocal)
+        await bridge_service.enqueue_outbound_mirror(
+            project_id=platform.project_id,
+            source_platform_id=platform.id,
+            source_platform_api_key=platform.api_key,
+            source_platform_type=platform.type or msg.platform_type,
+            from_uid=msg.from_uid,
+            extra=msg.extra,
+            dedupe_key=f"{platform.id}:ai:{hashlib.sha1(f'{msg.from_uid}:{stripped}'.encode('utf-8')).hexdigest()}",
+            sender_label="AI",
+            content=stripped,
+            msg_type=1,
+        )
+    except Exception:
+        logging.exception("[DISPATCH] mirror AI reply failed for platform_id=%s", getattr(platform, "id", None))
 
 
 def _expected_output_for(ptype: str) -> str | None:
@@ -280,6 +306,14 @@ async def process_message(
                         break
                 final = {"text": "".join(chunks)}
                 await adapter.send_final(final)
+                if platform is not None:
+                    asyncio.create_task(
+                        _mirror_ai_reply_async(
+                            msg,
+                            platform,
+                            str(final.get("text") or ""),
+                        )
+                    )
                 return (final.get("text") if isinstance(final, dict) else None)
         except Exception as e:
             if attempt == 2:
