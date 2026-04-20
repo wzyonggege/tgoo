@@ -28,17 +28,43 @@ from app.core.config import settings
 router = APIRouter()
 
 
+async def _resolve_ingest_platform(db: AsyncSession, platform_id_value: object, platform_api_key: str | None) -> Platform | None:
+    platform: Platform | None = None
+    try:
+        platform_id = uuid.UUID(str(platform_id_value))
+    except (TypeError, ValueError):
+        platform_id = None
+
+    if platform_id is not None:
+        platform = await db.scalar(
+            select(Platform).where(
+                Platform.id == platform_id,
+                Platform.deleted_at.is_(None),
+                Platform.is_active.is_(True),
+            )
+        )
+
+    if platform is None and str(platform_api_key or "").strip():
+        platform = await db.scalar(
+            select(Platform).where(
+                Platform.api_key == str(platform_api_key).strip(),
+                Platform.deleted_at.is_(None),
+                Platform.is_active.is_(True),
+            )
+        )
+
+    return platform
+
+
 @router.post("/ingest", responses={400: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
 async def ingest(req: Request, db: AsyncSession = Depends(get_db)) -> dict:
     raw = await req.json()
     msg = await normalizer.normalize(raw)
-    platform = None
-    try:
-        platform_id = uuid.UUID(str(msg.platform_id))
-    except (TypeError, ValueError):
-        platform_id = None
-    if platform_id is not None:
-        platform = await db.scalar(select(Platform).where(Platform.id == platform_id))
+    platform = await _resolve_ingest_platform(db, msg.platform_id, msg.platform_api_key)
+    if platform is not None:
+        msg.platform_id = str(platform.id)
+        if not str(msg.platform_type or "").strip():
+            msg.platform_type = platform.type
     if platform is not None and (platform.type or msg.platform_type or "").lower() == "custom":
         extra = _build_ingest_bridge_extra(raw, msg.extra, msg.from_uid)
         dedupe_source = _bridge_inbound_dedupe_seed(msg.from_uid, msg.content, extra)
