@@ -1,12 +1,29 @@
 from __future__ import annotations
-import asyncio
+import base64
+import hashlib
+import httpx
+import json
+import logging
+from typing import Any, Optional
+import uuid
+
 from fastapi import APIRouter, Request, Depends
+from fastapi import status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.error_utils import error_response, get_request_id
 from app.db.base import get_db
+from app.db.base import SessionLocal
+from app.db.models import Platform
+from app.api.wecom_utils import wecom_get_access_token, wecom_kf_send_msg, wecom_upload_temp_media, resolve_visitor_platform_open_id, resolve_wecom_open_kfid
+from app.api.slack_utils import slack_send_text, slack_send_file, slack_get_dm_channel
 from app.domain.services.normalizer import normalizer
 from app.domain.services.dispatcher import process_message
 from app.api.schemas import ErrorResponse
+from app.core.async_tasks import spawn_background_task
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -15,31 +32,38 @@ router = APIRouter()
 async def ingest(req: Request, db: AsyncSession = Depends(get_db)) -> dict:
     raw = await req.json()
     msg = await normalizer.normalize(raw)
+    platform = None
+    try:
+        platform_id = uuid.UUID(str(msg.platform_id))
+    except (TypeError, ValueError):
+        platform_id = None
+    if platform_id is not None:
+        platform = await db.scalar(select(Platform).where(Platform.id == platform_id))
+    if platform is not None and (platform.type or msg.platform_type or "").lower() == "custom":
+        extra = _build_ingest_bridge_extra(raw, msg.extra, msg.from_uid)
+        dedupe_source = _bridge_inbound_dedupe_seed(msg.from_uid, msg.content, extra)
+        display_name = _bridge_display_name(raw, extra, msg.from_uid)
+        try:
+            from app.domain.services.telegram_bridge import TelegramBridgeService
+
+            bridge_service = TelegramBridgeService(SessionLocal)
+            await bridge_service.enqueue_inbound(
+                project_id=platform.project_id,
+                source_platform_id=platform.id,
+                source_platform_api_key=platform.api_key,
+                source_platform_type=platform.type or msg.platform_type,
+                from_uid=msg.from_uid,
+                content=msg.content,
+                extra=extra,
+                dedupe_key=f"{platform.id}:ingest:{dedupe_source}",
+                display_name=display_name,
+            )
+        except Exception:
+            logging.exception("[INGEST] bridge inbound enqueue failed for platform_id=%s", platform.id)
     tgo_api_client = req.app.state.tgo_api_client
     sse_manager = req.app.state.sse_manager
     await process_message(msg, db, tgo_api_client, sse_manager)
     return {"ok": True}
-
-
-
-from typing import Optional
-import base64
-import hashlib
-import logging
-import httpx
-import uuid
-
-from fastapi import status
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-
-from app.api.error_utils import error_response, get_request_id
-from app.db.base import SessionLocal
-from app.db.models import Platform
-
-from app.api.wecom_utils import wecom_get_access_token, wecom_kf_send_msg, wecom_upload_temp_media, resolve_visitor_platform_open_id, resolve_wecom_open_kfid
-from app.api.slack_utils import slack_send_text, slack_send_file, slack_get_dm_channel
-from app.core.config import settings
 
 
 def _internalize_url(url: str) -> str:
@@ -85,6 +109,57 @@ def _sender_label_for_request(from_uid: str) -> str:
     return "客服"
 
 
+def _bridge_display_name(raw: dict[str, Any], extra: dict[str, Any], fallback_uid: str) -> str | None:
+    visitor_profile = extra.get("visitor_profile") if isinstance(extra.get("visitor_profile"), dict) else {}
+    candidates = [
+        raw.get("visitor_name"),
+        raw.get("nickname"),
+        raw.get("display_name"),
+        visitor_profile.get("nickname"),
+        visitor_profile.get("name"),
+        fallback_uid,
+    ]
+    for value in candidates:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _build_ingest_bridge_extra(raw: dict[str, Any], raw_extra: dict[str, Any] | None, from_uid: str) -> dict[str, Any]:
+    extra = dict(raw_extra or {})
+    if not str(extra.get("channel_id") or "").strip():
+        channel_id = str(raw.get("channel_id") or "").strip()
+        if channel_id:
+            extra["channel_id"] = channel_id
+    if extra.get("channel_type") is None:
+        raw_channel_type = raw.get("channel_type")
+        if raw_channel_type is not None:
+            extra["channel_type"] = raw_channel_type
+    if not str(extra.get("platform_open_id") or "").strip():
+        platform_open_id = str(raw.get("platform_open_id") or from_uid or "").strip()
+        if platform_open_id:
+            extra["platform_open_id"] = platform_open_id
+    return extra
+
+
+def _bridge_inbound_dedupe_seed(from_uid: str, content: str, extra: dict[str, Any]) -> str:
+    stable_id = (
+        str(extra.get("message_id") or "").strip()
+        or str(extra.get("client_msg_no") or "").strip()
+        or str(extra.get("timestamp") or "").strip()
+    )
+    if stable_id:
+        return stable_id
+    payload = json.dumps(
+        {"from_uid": from_uid, "content": content, "extra": extra},
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
 def _build_bridge_extra(
     *,
     platform_type: str,
@@ -92,16 +167,18 @@ def _build_bridge_extra(
     channel_type: int,
     platform_open_id: str,
     extra_values: dict[str, str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     values = extra_values or {}
+    base_extra: dict[str, Any] = {
+        "channel_id": channel_id,
+        "channel_type": channel_type,
+        "platform_open_id": platform_open_id,
+    }
     if platform_type == "custom":
-        return {
-            "channel_id": channel_id,
-            "channel_type": channel_type,
-            "platform_open_id": platform_open_id,
-        }
+        return base_extra
     if platform_type == "wecom":
         return {
+            **base_extra,
             "source_type": "wecom_kf",
             "wecom": {
                 "source_type": "wecom_kf",
@@ -110,18 +187,23 @@ def _build_bridge_extra(
             },
         }
     if platform_type == "email":
-        return {}
+        return base_extra
     if platform_type == "telegram":
         return {
+            **base_extra,
             "msg_type": values.get("msg_type", "1"),
-            "telegram": {"chat_id": platform_open_id},
+            "telegram": {"chat_id": values.get("chat_id", "") or platform_open_id},
         }
     if platform_type == "slack":
         return {
+            **base_extra,
             "msg_type": values.get("msg_type", "1"),
-            "slack": {"channel": platform_open_id},
+            "slack": {
+                "channel": values.get("channel", "") or platform_open_id,
+                "thread_ts": values.get("thread_ts", ""),
+            },
         }
-    return {}
+    return base_extra
 
 
 async def _mirror_platform_outbound_async(
@@ -202,6 +284,7 @@ async def _deliver_custom_platform_callback(
 def _schedule_outbound_mirror(
     *,
     platform: Platform,
+    source_from_uid: str,
     platform_open_id: str,
     req_body: SendMessageRequest,
     sender_label: str,
@@ -219,16 +302,18 @@ def _schedule_outbound_mirror(
     )
     dedupe_seed = f"{req_body.client_msg_no or ''}:{sender_label}:{msg_type}:{content}"
     dedupe_key = f"{platform.id}:outbound:{hashlib.sha1(dedupe_seed.encode('utf-8')).hexdigest()}"
-    asyncio.create_task(
+    spawn_background_task(
         _mirror_platform_outbound_async(
             platform=platform,
-            from_uid=platform_open_id,
+            from_uid=source_from_uid,
             extra=extra,
             dedupe_key=dedupe_key,
             sender_label=sender_label,
             content=content,
             msg_type=msg_type,
-        )
+        ),
+        logger=logging.getLogger(__name__),
+        error_message=f"[SEND] bridge outbound mirror failed for platform_id={platform.id}",
     )
 
 
@@ -308,13 +393,15 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                 "payload": req_body.payload,
             }
 
-            asyncio.create_task(
+            spawn_background_task(
                 _deliver_custom_platform_callback(
                     callback_url=callback_url,
                     custom_payload=custom_payload,
                     client_msg_no=client_msg_no_generated,
                     request_id=request_id,
-                )
+                ),
+                logger=logging.getLogger(__name__),
+                error_message=f"[SEND] custom callback delivery failed for platform_id={platform.id}",
             )
             logging.info(
                 "[SEND] client_msg_no=%s custom platform callback queued to %s request_id=%s",
@@ -324,6 +411,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
             )
             _schedule_outbound_mirror(
                 platform=platform,
+                source_from_uid=platform_open_id,
                 platform_open_id=platform_open_id,
                 req_body=req_body,
                 sender_label=_sender_label_for_request(req_body.from_uid),
@@ -359,6 +447,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                 logging.info("[SEND] client_msg_no=%s wecom text sent to %s", client_msg_no, external_userid)
                 _schedule_outbound_mirror(
                     platform=platform,
+                    source_from_uid=external_userid,
                     platform_open_id=external_userid,
                     req_body=req_body,
                     sender_label="客服",
@@ -389,6 +478,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                 logging.info("[SEND] client_msg_no=%s wecom image sent to %s", client_msg_no, external_userid)
                 _schedule_outbound_mirror(
                     platform=platform,
+                    source_from_uid=external_userid,
                     platform_open_id=external_userid,
                     req_body=req_body,
                     sender_label="客服",
@@ -438,6 +528,7 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
             logging.info("[SEND] client_msg_no=%s email sent to %s", client_msg_no, target_email)
             _schedule_outbound_mirror(
                 platform=platform,
+                source_from_uid=target_email,
                 platform_open_id=target_email,
                 req_body=req_body,
                 sender_label="客服",
@@ -455,15 +546,16 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                     request_id=request_id,
                 )
             
-            # Resolve target chat_id for visitor
-            chat_id = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
-            if not chat_id:
+            # Resolve visitor identity first; actual chat_id may be overridden by caller.
+            platform_open_id = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
+            if not platform_open_id:
                 return error_response(
                     status.HTTP_400_BAD_REQUEST,
                     code="VISITOR_NOT_FOUND",
-                    message="Could not resolve Telegram chat_id for visitor",
+                    message="Could not resolve Telegram user_id for visitor",
                     request_id=request_id,
                 )
+            chat_id = str(payload.get("chat_id") or payload.get("telegram_chat_id") or platform_open_id).strip()
             
             if msg_type == 1:
                 # Text message
@@ -487,9 +579,11 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                     logging.info("[SEND] client_msg_no=%s telegram text sent to %s", client_msg_no, chat_id)
                     _schedule_outbound_mirror(
                         platform=platform,
-                        platform_open_id=chat_id,
+                        source_from_uid=platform_open_id,
+                        platform_open_id=platform_open_id,
                         req_body=req_body,
                         sender_label="客服",
+                        extra_values={"chat_id": chat_id},
                     )
                     return {"ok": True, "client_msg_no": client_msg_no, "message": "Message sent successfully"}
                 else:
@@ -538,9 +632,11 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                     logging.info("[SEND] client_msg_no=%s telegram photo sent to %s", client_msg_no, chat_id)
                     _schedule_outbound_mirror(
                         platform=platform,
-                        platform_open_id=chat_id,
+                        source_from_uid=platform_open_id,
+                        platform_open_id=platform_open_id,
                         req_body=req_body,
                         sender_label="客服",
+                        extra_values={"chat_id": chat_id},
                     )
                     return {"ok": True, "client_msg_no": client_msg_no, "message": "Message sent successfully"}
                 else:
@@ -569,15 +665,16 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                     request_id=request_id,
                 )
             
-            # Resolve target user_id/channel for visitor
-            target_id = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
-            if not target_id:
+            # Resolve visitor identity first; actual target channel may be overridden by caller.
+            platform_open_id = resolved_platform_open_id or await resolve_visitor_platform_open_id(visitor_id)
+            if not platform_open_id:
                 return error_response(
                     status.HTTP_400_BAD_REQUEST,
                     code="VISITOR_NOT_FOUND",
                     message="Could not resolve Slack user_id for visitor",
                     request_id=request_id,
                 )
+            target_id = str(payload.get("channel") or payload.get("slack_channel") or platform_open_id).strip()
             
             if msg_type == 1:
                 # Text message
@@ -600,9 +697,11 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                     logging.info("[SEND] client_msg_no=%s slack text sent to %s", client_msg_no, target_id)
                     _schedule_outbound_mirror(
                         platform=platform,
-                        platform_open_id=resolved_platform_open_id or target_id,
+                        source_from_uid=platform_open_id,
+                        platform_open_id=platform_open_id,
                         req_body=req_body,
                         sender_label="客服",
+                        extra_values={"channel": target_id},
                     )
                     return {"ok": True, "client_msg_no": client_msg_no, "message": "Message sent successfully"}
                 else:
@@ -665,9 +764,11 @@ async def send_message(req_body: SendMessageRequest, request: Request, db: Async
                     logging.info("[SEND] client_msg_no=%s slack photo sent to %s", client_msg_no, target_id)
                     _schedule_outbound_mirror(
                         platform=platform,
-                        platform_open_id=resolved_platform_open_id or target_id,
+                        source_from_uid=platform_open_id,
+                        platform_open_id=platform_open_id,
                         req_body=req_body,
                         sender_label="客服",
+                        extra_values={"channel": target_id},
                     )
                     return {"ok": True, "client_msg_no": client_msg_no, "message": "Message sent successfully"}
                 else:

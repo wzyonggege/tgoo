@@ -387,10 +387,14 @@ class TelegramChannelListener:
         await self._maybe_upload_image_to_tgo_api(platform, msg_data, visitor)
 
         mapped_raw = self._build_mapped_message(platform, msg_data)
+        extra = mapped_raw.get("extra") or {}
+        extra["platform_open_id"] = msg_data["from_user"]
+        if visitor is not None:
+            extra["channel_id"] = visitor.channel_id or f"{visitor.id}-vtr"
+            extra["channel_type"] = 251
         if display_name or avatar_url:
-            extra = mapped_raw.get("extra") or {}
             extra["visitor_profile"] = {"nickname": display_name, "avatar_url": avatar_url}
-            mapped_raw["extra"] = extra
+        mapped_raw["extra"] = extra
 
         await self._bridge_service.enqueue_inbound(
             project_id=platform.project_id,

@@ -873,7 +873,7 @@ async def mirror_bridge_reply_internal(
         },
         from_uid=TELEGRAM_BRIDGE_OPERATOR_UID,
         channel_id=channel_id,
-        channel_type=req.channel_type,
+        channel_type=CHANNEL_TYPE_CUSTOMER_SERVICE,
         client_msg_no=f"tgbridge_{uuid4().hex}",
     )
 

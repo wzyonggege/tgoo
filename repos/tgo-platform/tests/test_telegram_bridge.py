@@ -56,6 +56,36 @@ class TelegramBridgeHelperTests(unittest.TestCase):
         )
         self.assertNotEqual(first, second)
 
+    def test_source_key_uses_channel_id_for_telegram_bridge_matching(self) -> None:
+        first = _source_key(
+            "telegram",
+            "platform_a",
+            "user_1",
+            {"channel_id": "visitor_a-vtr", "channel_type": 251, "platform_open_id": "user_1", "telegram": {"chat_id": "-1001"}},
+        )
+        second = _source_key(
+            "telegram",
+            "platform_a",
+            "user_1",
+            {"channel_id": "visitor_b-vtr", "channel_type": 251, "platform_open_id": "user_1", "telegram": {"chat_id": "-1001"}},
+        )
+        self.assertNotEqual(first, second)
+
+    def test_source_key_uses_channel_id_for_slack_bridge_matching(self) -> None:
+        first = _source_key(
+            "slack",
+            "platform_a",
+            "user_1",
+            {"channel_id": "visitor_a-vtr", "channel_type": 251, "platform_open_id": "user_1", "slack": {"channel": "D123"}},
+        )
+        second = _source_key(
+            "slack",
+            "platform_a",
+            "user_1",
+            {"channel_id": "visitor_b-vtr", "channel_type": 251, "platform_open_id": "user_1", "slack": {"channel": "D123"}},
+        )
+        self.assertNotEqual(first, second)
+
     def test_sanitize_extra_removes_visitor_profile_only(self) -> None:
         extra = {
             "project_id": "p1",

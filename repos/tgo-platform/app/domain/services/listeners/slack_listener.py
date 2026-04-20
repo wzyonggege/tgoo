@@ -13,6 +13,7 @@ Requires:
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import uuid
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.db.models import Platform
 from app.domain.services.telegram_bridge import TelegramBridgeService
+
+logger = logging.getLogger(__name__)
 
 
 class SlackPlatformConfig(BaseModel):
@@ -355,6 +358,9 @@ class SlackChannelListener:
             if self._loop is not None:
                 bridge_extra = {
                     "project_id": str(platform.project_id),
+                    "channel_id": channel_id,
+                    "channel_type": 251,
+                    "platform_open_id": user_id,
                     "msg_type": msg_type,
                     "slack": {
                         "channel": channel,
@@ -376,7 +382,13 @@ class SlackChannelListener:
                     ),
                     self._loop,
                 )
-                future.add_done_callback(lambda fut: fut.exception())
+                def _log_bridge_result(done_future: asyncio.Future[object]) -> None:
+                    try:
+                        done_future.result()
+                    except Exception:
+                        logger.exception("[SLACK] bridge inbound enqueue failed for platform_id=%s", platform.id)
+
+                future.add_done_callback(_log_bridge_result)
 
             try:
                 resp = requests.post(

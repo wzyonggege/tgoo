@@ -5,6 +5,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.async_tasks import spawn_background_task
 from app.core.config import settings
 from app.db.models import Platform
 from app.domain.entities import NormalizedMessage, ChatCompletionRequest
@@ -307,12 +308,14 @@ async def process_message(
                 final = {"text": "".join(chunks)}
                 await adapter.send_final(final)
                 if platform is not None:
-                    asyncio.create_task(
+                    spawn_background_task(
                         _mirror_ai_reply_async(
                             msg,
                             platform,
                             str(final.get("text") or ""),
-                        )
+                        ),
+                        logger=logging.getLogger(__name__),
+                        error_message=f"[DISPATCH] background AI mirror failed for platform_id={platform.id}",
                     )
                 return (final.get("text") if isinstance(final, dict) else None)
         except Exception as e:

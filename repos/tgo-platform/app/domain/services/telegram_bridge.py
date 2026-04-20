@@ -23,6 +23,7 @@ from app.api.telegram_utils import (
     telegram_send_photo,
     telegram_send_text,
 )
+from app.core.async_tasks import spawn_background_task
 from app.core.config import settings
 from app.db.models import Platform, TelegramBridgeBinding, TelegramBridgeOutbox, TelegramBridgeState
 from app.domain.entities import NormalizedMessage
@@ -139,14 +140,15 @@ def _extract_bridge_platform_open_id(extra: dict[str, Any], fallback_uid: str) -
 def _source_key(platform_type: str, platform_id: uuid.UUID | str, from_uid: str, extra: dict[str, Any]) -> str:
     parts: list[str] = [f"type={platform_type}", f"platform={platform_id}", f"uid={from_uid}"]
     ptype = (platform_type or "").lower()
-
-    if ptype in {"website", "custom"}:
+    if ptype in {"website", "custom", "telegram", "slack"}:
         channel_id = str(extra.get("channel_id") or "").strip()
         channel_type = str(extra.get("channel_type") or "").strip()
         if channel_id:
-            parts.append(f"channel={channel_id}")
+            parts.append(f"channel_id={channel_id}")
         if channel_type:
             parts.append(f"channel_type={channel_type}")
+
+    if ptype in {"website", "custom"}:
         platform_open_id = str(extra.get("platform_open_id") or "").strip()
         if platform_open_id:
             parts.append(f"open={platform_open_id}")
@@ -325,7 +327,11 @@ def _extract_update_message(update: dict[str, Any]) -> dict[str, Any] | None:
 async def _telegram_delete_webhook(bot_token: str) -> None:
     url = f"{TELEGRAM_API_BASE}/bot{bot_token}/deleteWebhook"
     async with httpx.AsyncClient(timeout=10) as client:
-        await client.post(url)
+        response = await client.post(url)
+    response.raise_for_status()
+    result = response.json()
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("description") or "Telegram deleteWebhook failed"))
 
 
 async def _telegram_get_updates(bot_token: str, offset: int, timeout_seconds: int) -> list[dict[str, Any]]:
@@ -350,6 +356,7 @@ async def _telegram_get_updates(bot_token: str, offset: int, timeout_seconds: in
 
 class TelegramBridgeService:
     _PROJECT_CONFIG_CACHE_TTL_SECONDS = 30.0
+    _PROJECT_CONFIG_MISS_TTL_SECONDS = 3.0
     _PROJECT_CONFIG_TIMEOUT_SECONDS = 2.5
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
@@ -543,12 +550,14 @@ class TelegramBridgeService:
             )
             adapter = await select_adapter_for_target(msg, platform=source_platform)
             await adapter.send_final({"text": reply_text})
-            asyncio.create_task(
+            spawn_background_task(
                 self._mirror_topic_reply_to_backoffice(
                     source_platform=source_platform,
                     binding=binding,
                     reply_text=reply_text,
-                )
+                ),
+                logger=logger,
+                error_message=f"[TELEGRAM_BRIDGE] background topic mirror failed for platform={source_platform.id}",
             )
 
             binding.last_message_at = datetime.now(timezone.utc)
@@ -601,7 +610,7 @@ class TelegramBridgeService:
 
         config = await self._fetch_project_bridge_config(project_id, platform_api_key=platform_api_key)
         self._project_config_cache[project_id] = _ProjectBridgeCacheEntry(
-            expires_at=now + self._PROJECT_CONFIG_CACHE_TTL_SECONDS,
+            expires_at=now + (self._PROJECT_CONFIG_CACHE_TTL_SECONDS if config is not None else self._PROJECT_CONFIG_MISS_TTL_SECONDS),
             config=config,
         )
         return config
