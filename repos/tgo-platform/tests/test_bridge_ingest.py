@@ -66,6 +66,7 @@ from app.domain.entities import NormalizedMessage
 class _DummyRequest:
     def __init__(self, body: dict[str, object]) -> None:
         self._body = body
+        self.state = SimpleNamespace(request_id="req-test")
         self.app = SimpleNamespace(
             state=SimpleNamespace(
                 tgo_api_client=object(),
@@ -78,7 +79,7 @@ class _DummyRequest:
 
 
 class _DummyDB:
-    def __init__(self, platform: SimpleNamespace) -> None:
+    def __init__(self, platform: SimpleNamespace | None) -> None:
         self.platform = platform
         self.calls = 0
 
@@ -99,7 +100,7 @@ class _RecordingBridgeService:
 
 
 class BridgeIngestTests(unittest.IsolatedAsyncioTestCase):
-    async def test_ingest_custom_bridge_falls_back_to_platform_api_key(self) -> None:
+    async def test_ingest_custom_bridge_falls_back_to_platform_api_key_when_fields_missing(self) -> None:
         platform = SimpleNamespace(
             id=uuid.uuid4(),
             project_id=uuid.uuid4(),
@@ -126,8 +127,8 @@ class BridgeIngestTests(unittest.IsolatedAsyncioTestCase):
                 from_uid="user-42",
                 content="hello from custom",
                 platform_api_key="ak_live_custom",
-                platform_type="custom",
-                platform_id="not-a-uuid",
+                platform_type="",
+                platform_id="",
                 extra={"platform_open_id": "user-42", "channel_id": "user-42-vtr", "channel_type": 251},
             )
 
@@ -161,6 +162,50 @@ class BridgeIngestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enqueue_call["project_id"], platform.project_id)
         self.assertEqual(len(captured_messages), 1)
         self.assertEqual(captured_messages[0].platform_id, str(platform.id))
+        self.assertEqual(captured_messages[0].platform_type, "custom")
+
+    async def test_ingest_returns_not_found_when_platform_cannot_be_resolved(self) -> None:
+        db = _DummyDB(None)
+        request = _DummyRequest({"hello": "world"})
+
+        original_normalize = messages.normalizer.normalize
+        original_process_message = messages.process_message
+        captured_messages: list[NormalizedMessage] = []
+
+        async def fake_normalize(raw: dict[str, object]) -> NormalizedMessage:
+            _ = raw
+            return NormalizedMessage(
+                source="webhook",
+                from_uid="user-missing",
+                content="hello from missing custom",
+                platform_api_key="ak_live_missing",
+                platform_type="",
+                platform_id="",
+                extra={"platform_open_id": "user-missing", "channel_id": "user-missing-vtr", "channel_type": 251},
+            )
+
+        async def fake_process_message(
+            msg: NormalizedMessage,
+            db_obj: object,
+            tgo_api_client: object,
+            sse_manager: object,
+        ) -> str | None:
+            _ = (db_obj, tgo_api_client, sse_manager)
+            captured_messages.append(msg)
+            return None
+
+        messages.normalizer.normalize = fake_normalize
+        messages.process_message = fake_process_message
+        try:
+            response = await messages.ingest(request, db)
+        finally:
+            messages.normalizer.normalize = original_normalize
+            messages.process_message = original_process_message
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.body.decode("utf-8"), '{"error":{"code":"PLATFORM_NOT_FOUND","message":"Platform not found","details":null},"request_id":"req-test"}')
+        self.assertEqual(db.calls, 1)
+        self.assertEqual(captured_messages, [])
 
 
 if __name__ == "__main__":

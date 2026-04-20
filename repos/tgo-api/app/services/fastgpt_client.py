@@ -101,10 +101,10 @@ class FastGPTClient:
             async with httpx.AsyncClient(timeout=config.get("timeout", settings.FASTGPT_TIMEOUT)) as client:
                 response = await client.post(url, headers=headers, json=payload)
         except httpx.TimeoutException as exc:
-            logger.error("FastGPT request timeout", url=url)
+            logger.error("FastGPT request timeout", extra={"url": url})
             raise HTTPException(status_code=504, detail="FastGPT request timed out") from exc
         except httpx.HTTPError as exc:
-            logger.error("FastGPT request error", error=str(exc))
+            logger.error("FastGPT request error", extra={"error": str(exc), "url": url})
             raise HTTPException(status_code=502, detail="Failed to connect to FastGPT") from exc
 
         if response.status_code >= 400:

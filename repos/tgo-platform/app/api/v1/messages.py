@@ -58,9 +58,17 @@ async def _resolve_ingest_platform(db: AsyncSession, platform_id_value: object, 
 
 @router.post("/ingest", responses={400: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
 async def ingest(req: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    request_id = get_request_id(req)
     raw = await req.json()
     msg = await normalizer.normalize(raw)
     platform = await _resolve_ingest_platform(db, msg.platform_id, msg.platform_api_key)
+    if platform is None:
+        return error_response(
+            status.HTTP_404_NOT_FOUND,
+            code="PLATFORM_NOT_FOUND",
+            message="Platform not found",
+            request_id=request_id,
+        )
     if platform is not None:
         msg.platform_id = str(platform.id)
         if not str(msg.platform_type or "").strip():

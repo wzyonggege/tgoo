@@ -93,6 +93,13 @@ def _display_platform_name(platform_type: str) -> str:
     return _PLATFORM_LABELS.get((platform_type or "").lower(), platform_type or "Platform")
 
 
+def _bridge_platform_label(platform_type: str, extra: dict[str, Any] | None = None) -> str:
+    platform_name = str((extra or {}).get("platform_name") or "").strip()
+    if platform_name:
+        return platform_name
+    return _display_platform_name(platform_type)
+
+
 def _copy_jsonable(value: dict[str, Any] | None) -> dict[str, Any]:
     if not value:
         return {}
@@ -198,7 +205,7 @@ def _source_key(platform_type: str, platform_id: uuid.UUID | str, from_uid: str,
 
 
 def _topic_title(binding: TelegramBridgeBinding) -> str:
-    platform_name = _display_platform_name(binding.source_platform_type)
+    platform_name = _bridge_platform_label(binding.source_platform_type, binding.source_extra or {})
     label = (binding.source_display_name or binding.source_from_uid or "visitor").strip()
     short_hash = hashlib.sha1(binding.source_key.encode("utf-8")).hexdigest()[:6]
     return f"{platform_name} · {label} · {short_hash}"[:128]
@@ -209,8 +216,10 @@ def _format_bridge_text(
     display_name: str | None,
     from_uid: str,
     content: str,
+    platform_name: str | None = None,
 ) -> str:
-    header = f"[{_display_platform_name(platform_type)}] {(display_name or from_uid).strip()}"
+    label = str(platform_name or "").strip() or _display_platform_name(platform_type)
+    header = f"[{label}] {(display_name or from_uid).strip()}"
     return f"{header}\nID: {from_uid}\n\n{_compact_text(content)}"
 
 
@@ -243,7 +252,8 @@ def _build_inbound_payload(
     content: str,
     extra: dict[str, Any],
 ) -> str:
-    header = f"[{_display_platform_name(platform_type)}] {(display_name or from_uid).strip()}\nID: {from_uid}"
+    platform_label = _bridge_platform_label(platform_type, extra)
+    header = f"[{platform_label}] {(display_name or from_uid).strip()}\nID: {from_uid}"
     msg_type = _extract_msg_type(extra)
     if msg_type == 2 and _looks_like_image_url(content):
         return _serialize_payload(
@@ -261,6 +271,7 @@ def _build_inbound_payload(
                 display_name=display_name,
                 from_uid=from_uid,
                 content=content,
+                platform_name=platform_label,
             ),
         )
     )
@@ -386,6 +397,12 @@ class TelegramBridgeService:
             )
             if bridge_project is None:
                 return
+
+            if not str(cleaned_extra.get("platform_name") or "").strip():
+                source_platform = await session.get(Platform, source_platform_id)
+                platform_name = str(getattr(source_platform, "name", "") or "").strip()
+                if platform_name:
+                    cleaned_extra["platform_name"] = platform_name
 
             binding = await self._get_or_create_binding(
                 session=session,

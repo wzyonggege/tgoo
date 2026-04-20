@@ -69,6 +69,7 @@ router = APIRouter()
 
 AI_ASSISTANT_WUKONG_UID = "ai-assistant-staff"
 TELEGRAM_BRIDGE_OPERATOR_UID = "telegram-bridge-operator-bridge"
+_background_tasks: set[asyncio.Task[Any]] = set()
 
 class BridgeReplyMirrorRequest(BaseModel):
     source_platform_id: UUID | None = Field(None, description="Source platform id for safety check")
@@ -76,6 +77,12 @@ class BridgeReplyMirrorRequest(BaseModel):
     channel_id: str | None = Field(None, description="Resolved customer service channel id if already known")
     channel_type: int = Field(CHANNEL_TYPE_CUSTOMER_SERVICE, description="Target WuKongIM channel type")
     content: str = Field(..., description="Bridge reply content")
+
+
+def _spawn_background_task(coro: Any) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 def _should_prefer_ai_reply(platform: Platform, visitor: Visitor) -> bool:
@@ -183,6 +190,65 @@ async def _send_custom_ai_reply_to_platform(
         logger.warning(
             "Custom AI callback forwarding failed",
             extra={"platform_id": str(platform.id), "channel_id": channel_id, "error": str(exc)},
+        )
+
+
+async def _forward_custom_inbound_to_platform_bridge(
+    *,
+    platform: Platform,
+    from_uid: str,
+    content: str,
+    msg_type: int,
+    channel_id: str,
+    channel_type: int,
+    visitor_name: str | None = None,
+    extra: Dict[str, Any] | None = None,
+) -> None:
+    if (platform.type or "").lower() != "custom":
+        return
+    platform_api_key = str(platform.api_key or "").strip()
+    if not platform_api_key:
+        return
+
+    bridge_extra: Dict[str, Any] = dict(extra or {})
+    bridge_extra["channel_id"] = channel_id
+    bridge_extra["channel_type"] = channel_type
+    bridge_extra["platform_open_id"] = from_uid
+    bridge_extra["msg_type"] = int(msg_type)
+    if visitor_name and not str(bridge_extra.get("display_name") or "").strip():
+        bridge_extra["display_name"] = visitor_name
+        bridge_extra["visitor_profile"] = {"name": visitor_name, "nickname": visitor_name}
+
+    payload = {
+        "source": "custom_api",
+        "from_uid": from_uid,
+        "content": content,
+        "platform_api_key": platform_api_key,
+        "platform_type": platform.type or "custom",
+        "platform_id": str(platform.id),
+        "visitor_name": visitor_name,
+        "extra": bridge_extra,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=min(float(settings.PLATFORM_SERVICE_TIMEOUT), 2.5)) as client:
+            response = await client.post(
+                f"{settings.PLATFORM_SERVICE_URL.rstrip('/')}/ingest",
+                json=payload,
+            )
+        if response.status_code >= 400:
+            logger.warning(
+                "Custom inbound bridge forwarding failed",
+                extra={
+                    "platform_id": str(platform.id),
+                    "status_code": response.status_code,
+                    "body": response.text[:300],
+                },
+            )
+    except Exception as exc:
+        logger.warning(
+            "Custom inbound bridge forwarding exception",
+            extra={"platform_id": str(platform.id), "error": str(exc)},
         )
 
 
@@ -429,6 +495,19 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
         from app.services.storage import get_storage
         storage = get_storage()
         req.message = storage.resolve_url(req.message)
+
+    _spawn_background_task(
+        _forward_custom_inbound_to_platform_bridge(
+            platform=platform,
+            from_uid=req.from_uid,
+            content=req.message,
+            msg_type=int(req.msg_type or MessageType.TEXT),
+            channel_id=channel_id_enc,
+            channel_type=channel_type,
+            visitor_name=req.visitor_name,
+            extra=req.extra,
+        )
+    )
 
     # 3.2) Forward a copy of user message to WuKongIM (best-effort)
     if req.forward_user_message_to_wukongim:
@@ -1181,6 +1260,19 @@ async def chat_completion_openai_compatible(
     channel_id_enc = build_visitor_channel_id(visitor.id)
     channel_type = CHANNEL_TYPE_CUSTOMER_SERVICE
     session_id = platform_open_id
+
+    _spawn_background_task(
+        _forward_custom_inbound_to_platform_bridge(
+            platform=platform,
+            from_uid=platform_open_id,
+            content=user_message,
+            msg_type=int(user_message_type or MessageType.TEXT),
+            channel_id=channel_id_enc,
+            channel_type=channel_type,
+            visitor_name=req.user,
+            extra=None,
+        )
+    )
 
     # 4.2) Forward a copy of user message to WuKongIM (best-effort)
     await chat_service.send_user_message_to_wukongim(
