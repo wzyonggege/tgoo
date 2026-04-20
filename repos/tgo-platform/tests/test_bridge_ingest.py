@@ -207,6 +207,64 @@ class BridgeIngestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.calls, 1)
         self.assertEqual(captured_messages, [])
 
+    async def test_ingest_custom_api_bridge_only_skips_process_message(self) -> None:
+        platform = SimpleNamespace(
+            id=uuid.uuid4(),
+            project_id=uuid.uuid4(),
+            type="custom",
+            api_key="ak_live_custom",
+            name="自定义",
+            deleted_at=None,
+            is_active=True,
+        )
+        db = _DummyDB(platform)
+        request = _DummyRequest({"source": "custom_api"})
+
+        original_normalize = messages.normalizer.normalize
+        original_process_message = messages.process_message
+
+        import app.domain.services.telegram_bridge as telegram_bridge_module
+
+        original_bridge_service = telegram_bridge_module.TelegramBridgeService
+        captured_messages: list[NormalizedMessage] = []
+
+        async def fake_normalize(raw: dict[str, object]) -> NormalizedMessage:
+            return NormalizedMessage(
+                source=str(raw.get("source") or "webhook"),
+                from_uid="user-bridge",
+                content="hello bridge only",
+                platform_api_key="ak_live_custom",
+                platform_type="custom",
+                platform_id="",
+                extra={"platform_open_id": "user-bridge", "channel_id": "user-bridge-vtr", "channel_type": 251},
+            )
+
+        async def fake_process_message(
+            msg: NormalizedMessage,
+            db_obj: object,
+            tgo_api_client: object,
+            sse_manager: object,
+        ) -> str | None:
+            _ = (db_obj, tgo_api_client, sse_manager)
+            captured_messages.append(msg)
+            return None
+
+        _RecordingBridgeService.calls = []
+        messages.normalizer.normalize = fake_normalize
+        messages.process_message = fake_process_message
+        telegram_bridge_module.TelegramBridgeService = _RecordingBridgeService
+        try:
+            result = await messages.ingest(request, db)
+        finally:
+            messages.normalizer.normalize = original_normalize
+            messages.process_message = original_process_message
+            telegram_bridge_module.TelegramBridgeService = original_bridge_service
+
+        self.assertEqual(result, {"ok": True, "bridge_only": True})
+        self.assertEqual(db.calls, 1)
+        self.assertEqual(len(_RecordingBridgeService.calls), 1)
+        self.assertEqual(captured_messages, [])
+
 
 if __name__ == "__main__":
     unittest.main()

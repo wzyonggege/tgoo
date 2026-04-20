@@ -94,6 +94,9 @@ async def ingest(req: Request, db: AsyncSession = Depends(get_db)) -> dict:
             )
         except Exception:
             logging.exception("[INGEST] bridge inbound enqueue failed for platform_id=%s", platform.id)
+        if str(raw.get("source") or "").strip() == "custom_api":
+            logging.info("[INGEST] custom_api bridge-only ingest accepted for platform_id=%s", platform.id)
+            return {"ok": True, "bridge_only": True}
     tgo_api_client = req.app.state.tgo_api_client
     sse_manager = req.app.state.sse_manager
     await process_message(msg, db, tgo_api_client, sse_manager)
