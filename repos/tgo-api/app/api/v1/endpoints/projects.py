@@ -8,6 +8,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.database import get_db
 from app.core.logging import get_logger
@@ -19,6 +20,10 @@ from app.schemas import (
     ProjectBridgeChatProbeResponse,
     ProjectBridgeConfigResponse,
     ProjectBridgeConfigUpdate,
+    ProjectBridgeObservabilityBinding,
+    ProjectBridgeObservabilityFailure,
+    ProjectBridgeObservabilityResponse,
+    ProjectBridgeObservabilitySummary,
     ProjectCreate,
     ProjectListResponse,
     ProjectResponse,
@@ -134,6 +139,20 @@ def _extract_group_chats_from_updates(updates: list[dict]) -> dict[str, dict]:
                 "username": chat.get("username") or existing.get("username"),
             }
     return chats
+
+
+def _to_bridge_summary(row: dict | None) -> ProjectBridgeObservabilitySummary:
+    payload = row or {}
+    return ProjectBridgeObservabilitySummary(
+        total_bindings=int(payload.get("total_bindings") or 0),
+        pending_outbox=int(payload.get("pending_outbox") or 0),
+        processing_outbox=int(payload.get("processing_outbox") or 0),
+        failed_outbox=int(payload.get("failed_outbox") or 0),
+        completed_outbox=int(payload.get("completed_outbox") or 0),
+        last_binding_at=payload.get("last_binding_at"),
+        last_outbox_at=payload.get("last_outbox_at"),
+        last_failed_at=payload.get("last_failed_at"),
+    )
 
 
 @router.get(
@@ -411,6 +430,154 @@ async def probe_project_bridge_chats(
         bot_username=str(bot_info.get("username")) if bot_info.get("username") else None,
         chats=chat_candidates,
         warning=warning,
+    )
+
+
+@router.get(
+    "/{project_id}/bridge-observability",
+    response_model=ProjectBridgeObservabilityResponse,
+)
+async def get_project_bridge_observability(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Staff = Depends(get_current_active_user),
+) -> ProjectBridgeObservabilityResponse:
+    """Get project-level Telegram bridge observability."""
+    logger.info(f"User {current_user.username} getting bridge observability for project: {project_id}")
+    _get_project_or_404(db, project_id)
+
+    summary_row = db.execute(
+        text(
+            """
+            with binding_stats as (
+                select
+                    count(*)::int as total_bindings,
+                    max(updated_at) as last_binding_at
+                from pt_telegram_bridge_binding
+                where project_id = :project_id
+            ),
+            outbox_stats as (
+                select
+                    count(*) filter (where status = 'pending')::int as pending_outbox,
+                    count(*) filter (where status = 'processing')::int as processing_outbox,
+                    count(*) filter (where status = 'failed')::int as failed_outbox,
+                    count(*) filter (where status = 'completed')::int as completed_outbox,
+                    max(fetched_at) as last_outbox_at,
+                    max(processed_at) filter (where status = 'failed') as last_failed_at
+                from pt_telegram_bridge_outbox
+                where project_id = :project_id
+            )
+            select
+                binding_stats.total_bindings,
+                binding_stats.last_binding_at,
+                outbox_stats.pending_outbox,
+                outbox_stats.processing_outbox,
+                outbox_stats.failed_outbox,
+                outbox_stats.completed_outbox,
+                outbox_stats.last_outbox_at,
+                outbox_stats.last_failed_at
+            from binding_stats
+            cross join outbox_stats
+            """
+        ),
+        {"project_id": str(project_id)},
+    ).mappings().first()
+
+    failure_rows = db.execute(
+        text(
+            """
+            select
+                o.id::text as outbox_id,
+                o.binding_id::text as binding_id,
+                o.status,
+                o.retry_count,
+                o.error_message,
+                o.dedupe_key,
+                o.fetched_at,
+                o.processed_at,
+                b.source_platform_id::text as source_platform_id,
+                p.name as source_platform_name,
+                b.source_display_name,
+                b.source_from_uid,
+                b.telegram_chat_id,
+                b.topic_id,
+                b.topic_name
+            from pt_telegram_bridge_outbox o
+            join pt_telegram_bridge_binding b on b.id = o.binding_id
+            left join pt_platforms p on p.id = b.source_platform_id
+            where o.project_id = :project_id
+              and o.status = 'failed'
+            order by coalesce(o.processed_at, o.fetched_at) desc
+            limit 10
+            """
+        ),
+        {"project_id": str(project_id)},
+    ).mappings().all()
+
+    binding_rows = db.execute(
+        text(
+            """
+            select
+                b.id::text as binding_id,
+                b.source_platform_id::text as source_platform_id,
+                p.name as source_platform_name,
+                b.source_platform_type,
+                b.source_display_name,
+                b.source_from_uid,
+                b.telegram_chat_id,
+                b.topic_id,
+                b.topic_name,
+                b.last_message_at,
+                b.updated_at
+            from pt_telegram_bridge_binding b
+            left join pt_platforms p on p.id = b.source_platform_id
+            where b.project_id = :project_id
+            order by coalesce(b.last_message_at, b.updated_at) desc
+            limit 10
+            """
+        ),
+        {"project_id": str(project_id)},
+    ).mappings().all()
+
+    return ProjectBridgeObservabilityResponse(
+        project_id=project_id,
+        summary=_to_bridge_summary(summary_row),
+        recent_failures=[
+            ProjectBridgeObservabilityFailure(
+                outbox_id=str(row["outbox_id"]),
+                binding_id=str(row["binding_id"]),
+                status=str(row["status"]),
+                retry_count=int(row["retry_count"] or 0),
+                error_message=str(row["error_message"]) if row.get("error_message") else None,
+                dedupe_key=str(row["dedupe_key"]),
+                fetched_at=row["fetched_at"],
+                processed_at=row.get("processed_at"),
+                source_platform_id=str(row["source_platform_id"]) if row.get("source_platform_id") else None,
+                source_platform_name=str(row["source_platform_name"]) if row.get("source_platform_name") else None,
+                source_display_name=str(row["source_display_name"]) if row.get("source_display_name") else None,
+                source_from_uid=str(row["source_from_uid"]) if row.get("source_from_uid") else None,
+                telegram_chat_id=str(row["telegram_chat_id"]) if row.get("telegram_chat_id") else None,
+                topic_id=int(row["topic_id"]) if row.get("topic_id") is not None else None,
+                topic_name=str(row["topic_name"]) if row.get("topic_name") else None,
+            )
+            for row in failure_rows
+        ],
+        recent_bindings=[
+            ProjectBridgeObservabilityBinding(
+                binding_id=str(row["binding_id"]),
+                source_platform_id=str(row["source_platform_id"]),
+                source_platform_name=str(row["source_platform_name"]) if row.get("source_platform_name") else None,
+                source_platform_type=str(row["source_platform_type"]),
+                source_display_name=str(row["source_display_name"]) if row.get("source_display_name") else None,
+                source_from_uid=str(row["source_from_uid"]),
+                telegram_chat_id=str(row["telegram_chat_id"]),
+                topic_id=int(row["topic_id"]) if row.get("topic_id") is not None else None,
+                topic_name=str(row["topic_name"]) if row.get("topic_name") else None,
+                last_message_at=row.get("last_message_at"),
+                updated_at=row["updated_at"],
+            )
+            for row in binding_rows
+        ],
     )
 
 

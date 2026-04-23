@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link2, Loader2, MessageSquare, Save, Search, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Link2, Loader2, MessageSquare, RefreshCw, Save, Search, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/hooks/useToast';
 import { useAuthStore } from '@/stores/authStore';
@@ -8,6 +8,7 @@ import projectConfigApi, {
   type ProjectBridgeChatProbeResponse,
   type ProjectBridgeConfigResponse,
   type ProjectBridgeConfigUpdate,
+  type ProjectBridgeObservabilityResponse,
 } from '@/services/projectConfigApi';
 
 interface BridgeFormState {
@@ -43,6 +44,27 @@ const BridgeSettings: React.FC = () => {
   const [probing, setProbing] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [probeResult, setProbeResult] = useState<ProjectBridgeChatProbeResponse | null>(null);
+  const [observability, setObservability] = useState<ProjectBridgeObservabilityResponse | null>(null);
+  const [observabilityLoading, setObservabilityLoading] = useState<boolean>(false);
+  const [observabilityError, setObservabilityError] = useState<string | null>(null);
+
+  const loadObservability = useCallback(async () => {
+    if (!projectId) {
+      setObservabilityError(t('settings.bridge.noProject', '当前账号没有可用项目'));
+      return;
+    }
+    setObservabilityLoading(true);
+    try {
+      const result = await projectConfigApi.getBridgeObservability(projectId);
+      setObservability(result);
+      setObservabilityError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('settings.bridge.observabilityLoadError', '加载桥接观测失败');
+      setObservabilityError(message);
+    } finally {
+      setObservabilityLoading(false);
+    }
+  }, [projectId, t]);
 
   const loadData = useCallback(async () => {
     if (!projectId) {
@@ -58,13 +80,14 @@ const BridgeSettings: React.FC = () => {
       setSavedForm(nextForm);
       setProbeResult(null);
       setLoadError(null);
+      void loadObservability();
     } catch (error) {
       const message = error instanceof Error ? error.message : t('settings.bridge.loadError', '加载桥接配置失败');
       setLoadError(message);
     } finally {
       setLoading(false);
     }
-  }, [projectId, t]);
+  }, [projectId, t, loadObservability]);
 
   useEffect(() => {
     void loadData();
@@ -138,6 +161,7 @@ const BridgeSettings: React.FC = () => {
       const nextForm = toFormState(saved);
       setForm(nextForm);
       setSavedForm(nextForm);
+      void loadObservability();
       showSuccess(t('common.success', '成功'), t('settings.bridge.saveSuccess', 'Telegram 中继配置已保存'));
     } catch (error) {
       const message = error instanceof Error ? error.message : t('settings.bridge.saveError', '保存桥接配置失败');
@@ -145,6 +169,17 @@ const BridgeSettings: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const formatDateTime = (value: string | null | undefined): string => {
+    if (!value) {
+      return t('settings.bridge.observabilityNotAvailable', '暂无');
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleString();
   };
 
   return (
@@ -321,9 +356,24 @@ const BridgeSettings: React.FC = () => {
         </section>
 
         <section className="xl:col-span-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-            {t('settings.bridge.statusTitle', '当前桥接状态')}
-          </h3>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+              {t('settings.bridge.statusTitle', '当前桥接状态')}
+            </h3>
+            <button
+              type="button"
+              onClick={() => void loadObservability()}
+              disabled={observabilityLoading || !projectId}
+              className={`inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium ${
+                !observabilityLoading && projectId
+                  ? 'border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700/60'
+                  : 'border border-gray-200 text-gray-400 cursor-not-allowed dark:border-gray-700 dark:text-gray-500'
+              }`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${observabilityLoading ? 'animate-spin' : ''}`} />
+              {t('settings.bridge.refreshObservability', '刷新观测')}
+            </button>
+          </div>
           <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 text-sm space-y-2">
             <p className="text-gray-700 dark:text-gray-200">
               {t('settings.bridge.statusEnabled', '是否启用')}: {form.bridgeEnabled ? t('common.enabled', '已启用') : t('common.disabled', '未启用')}
@@ -337,6 +387,110 @@ const BridgeSettings: React.FC = () => {
             <p className="text-gray-700 dark:text-gray-200">
               {t('settings.bridge.statusAdminOnly', '管理员限制')}: {form.bridgeAdminOnly ? t('settings.bridge.adminOnlyOn', '仅管理员回发') : t('settings.bridge.adminOnlyOff', '所有成员都可回发')}
             </p>
+          </div>
+
+          <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+            <div className="text-sm font-medium text-gray-800 dark:text-gray-100">
+              {t('settings.bridge.observabilityTitle', '中继观测')}
+            </div>
+            {observabilityError ? (
+              <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-200">
+                {observabilityError}
+              </div>
+            ) : observabilityLoading && !observability ? (
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('common.loading', '加载中...')}</div>
+            ) : observability ? (
+              <>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/50">
+                    <div className="text-gray-500 dark:text-gray-400">{t('settings.bridge.metricBindings', '会话绑定')}</div>
+                    <div className="mt-1 text-base font-semibold text-gray-800 dark:text-gray-100">{observability.summary.total_bindings}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/50">
+                    <div className="text-gray-500 dark:text-gray-400">{t('settings.bridge.metricFailed', '失败投递')}</div>
+                    <div className={`mt-1 text-base font-semibold ${observability.summary.failed_outbox > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-800 dark:text-gray-100'}`}>
+                      {observability.summary.failed_outbox}
+                    </div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/50">
+                    <div className="text-gray-500 dark:text-gray-400">{t('settings.bridge.metricPending', '待发送')}</div>
+                    <div className="mt-1 text-base font-semibold text-gray-800 dark:text-gray-100">{observability.summary.pending_outbox}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900/50">
+                    <div className="text-gray-500 dark:text-gray-400">{t('settings.bridge.metricCompleted', '已发送')}</div>
+                    <div className="mt-1 text-base font-semibold text-gray-800 dark:text-gray-100">{observability.summary.completed_outbox}</div>
+                  </div>
+                </div>
+
+                <div className="space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                  <div>{t('settings.bridge.metricLastBinding', '最近绑定')}: {formatDateTime(observability.summary.last_binding_at)}</div>
+                  <div>{t('settings.bridge.metricLastOutbox', '最近出站')}: {formatDateTime(observability.summary.last_outbox_at)}</div>
+                  <div>{t('settings.bridge.metricLastFailed', '最近失败')}: {formatDateTime(observability.summary.last_failed_at)}</div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-200">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                    {t('settings.bridge.recentFailures', '最近失败')}
+                  </div>
+                  {observability.recent_failures.length === 0 ? (
+                    <div className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+                      {t('settings.bridge.noRecentFailures', '最近没有 bridge 失败记录')}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {observability.recent_failures.map((item) => (
+                        <div key={item.outbox_id} className="rounded-md border border-red-200 bg-red-50 p-3 text-xs dark:border-red-900/70 dark:bg-red-950/20">
+                          <div className="font-medium text-red-800 dark:text-red-200">
+                            {(item.source_platform_name || item.source_platform_id || t('settings.bridge.unknownPlatform', '未知渠道'))}
+                            {item.source_display_name ? ` · ${item.source_display_name}` : ''}
+                          </div>
+                          <div className="mt-1 text-red-700 dark:text-red-300 break-all">
+                            {item.error_message || t('settings.bridge.noErrorMessage', '无错误详情')}
+                          </div>
+                          <div className="mt-2 space-y-1 text-red-700/90 dark:text-red-200/90">
+                            <div>{t('settings.bridge.failureTopic', 'Topic')}: {item.topic_name || item.topic_id || t('settings.bridge.observabilityNotAvailable', '暂无')}</div>
+                            <div>{t('settings.bridge.failureChat', '群 Chat ID')}: {item.telegram_chat_id || t('settings.bridge.observabilityNotAvailable', '暂无')}</div>
+                            <div>{t('settings.bridge.failureRetry', '重试次数')}: {item.retry_count}</div>
+                            <div>{t('settings.bridge.failureTime', '失败时间')}: {formatDateTime(item.processed_at || item.fetched_at)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                    {t('settings.bridge.recentBindings', '最近绑定')}
+                  </div>
+                  {observability.recent_bindings.length === 0 ? (
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {t('settings.bridge.noBindings', '当前项目还没有创建过 bridge 绑定')}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {observability.recent_bindings.map((item) => (
+                        <div key={item.binding_id} className="rounded-md border border-gray-200 p-3 text-xs dark:border-gray-700">
+                          <div className="font-medium text-gray-800 dark:text-gray-100">
+                            {(item.source_platform_name || item.source_platform_type)} · {item.source_display_name || item.source_from_uid}
+                          </div>
+                          <div className="mt-1 space-y-1 text-gray-500 dark:text-gray-400">
+                            <div>{t('settings.bridge.bindingTopic', 'Topic')}: {item.topic_name || item.topic_id || t('settings.bridge.observabilityNotAvailable', '暂无')}</div>
+                            <div>{t('settings.bridge.bindingChat', '群 Chat ID')}: {item.telegram_chat_id}</div>
+                            <div>{t('settings.bridge.bindingLastMessage', '最后消息')}: {formatDateTime(item.last_message_at || item.updated_at)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {t('settings.bridge.observabilityEmpty', '暂无 bridge 观测数据')}
+              </div>
+            )}
           </div>
 
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
