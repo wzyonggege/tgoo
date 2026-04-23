@@ -56,10 +56,9 @@ def _bridge_response(project: Project) -> ProjectBridgeConfigResponse:
     )
 
 
-def _get_platform_for_bridge_read(
+def _get_platform_by_bridge_api_key(
     db: Session,
     *,
-    project_id: UUID,
     api_key: str,
 ) -> Platform:
     platform = db.query(Platform).filter(
@@ -71,6 +70,16 @@ def _get_platform_for_bridge_read(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid platform_api_key",
         )
+    return platform
+
+
+def _get_platform_for_bridge_read(
+    db: Session,
+    *,
+    project_id: UUID,
+    api_key: str,
+) -> Platform:
+    platform = _get_platform_by_bridge_api_key(db, api_key=api_key)
     if platform.project_id != project_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -184,6 +193,29 @@ async def create_project(
     logger.info(f"Created project {project.id} with name: {project.name}")
 
     return ProjectResponse.model_validate(project)
+
+
+@router.get(
+    "/bridge-config/internal/by-platform",
+    response_model=ProjectBridgeConfigResponse,
+    include_in_schema=False,
+)
+async def get_project_bridge_config_internal_by_platform(
+    db: Session = Depends(get_db),
+    platform_api_key: str | None = None,
+    x_platform_api_key: str | None = Header(None, alias="X-Platform-API-Key"),
+) -> ProjectBridgeConfigResponse:
+    """Internal bridge config lookup using only the platform API key."""
+    api_key = platform_api_key or x_platform_api_key
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing platform_api_key",
+        )
+
+    platform = _get_platform_by_bridge_api_key(db, api_key=api_key)
+    project = _get_project_or_404(db, platform.project_id)
+    return _bridge_response(project)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

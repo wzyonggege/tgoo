@@ -81,6 +81,7 @@ class _BridgeProjectEntry:
 @dataclass
 class _ProjectBridgeCacheEntry:
     expires_at: float
+    stale_expires_at: float
     config: ProjectBridgeConfig | None
 
 
@@ -381,6 +382,7 @@ async def _telegram_get_updates(bot_token: str, offset: int, timeout_seconds: in
 class TelegramBridgeService:
     _PROJECT_CONFIG_CACHE_TTL_SECONDS = 30.0
     _PROJECT_CONFIG_MISS_TTL_SECONDS = 3.0
+    _PROJECT_CONFIG_STALE_TTL_SECONDS = 300.0
     _PROJECT_CONFIG_TIMEOUT_SECONDS = 2.5
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
@@ -409,7 +411,15 @@ class TelegramBridgeService:
                 platform_api_key=source_platform_api_key,
             )
             if bridge_project is None:
+                logger.info(
+                    "[TELEGRAM_BRIDGE] skip inbound enqueue: bridge unavailable project=%s platform=%s type=%s dedupe=%s",
+                    project_id,
+                    source_platform_id,
+                    source_platform_type,
+                    dedupe_key,
+                )
                 return
+            effective_project_id = bridge_project.project_id
 
             if not str(cleaned_extra.get("platform_name") or "").strip():
                 source_platform = await session.get(Platform, source_platform_id)
@@ -436,7 +446,7 @@ class TelegramBridgeService:
                 extra=cleaned_extra,
             )
             outbox = TelegramBridgeOutbox(
-                project_id=project_id,
+                project_id=effective_project_id,
                 binding_id=binding.id,
                 dedupe_key=dedupe_key,
                 payload_text=payload_text,
@@ -444,8 +454,23 @@ class TelegramBridgeService:
             session.add(outbox)
             try:
                 await session.commit()
+                logger.info(
+                    "[TELEGRAM_BRIDGE] inbound enqueued project=%s requested_project=%s platform=%s binding=%s dedupe=%s",
+                    effective_project_id,
+                    project_id,
+                    source_platform_id,
+                    binding.id,
+                    dedupe_key,
+                )
             except IntegrityError:
                 await session.rollback()
+                logger.info(
+                    "[TELEGRAM_BRIDGE] inbound deduped project=%s requested_project=%s platform=%s dedupe=%s",
+                    effective_project_id,
+                    project_id,
+                    source_platform_id,
+                    dedupe_key,
+                )
 
     async def enqueue_outbound_mirror(
         self,
@@ -471,17 +496,19 @@ class TelegramBridgeService:
             )
             if bridge_project is None:
                 return
+            effective_project_id = bridge_project.project_id
 
             binding = await self._find_binding_for_outbound(
                 session=session,
-                project_id=project_id,
+                project_id=effective_project_id,
                 source_platform_id=source_platform_id,
                 source_key=source_key,
                 from_uid=from_uid,
             )
             if binding is None:
                 logger.info(
-                    "[TELEGRAM_BRIDGE] skip outbound mirror: binding not found project=%s platform=%s from_uid=%s",
+                    "[TELEGRAM_BRIDGE] skip outbound mirror: binding not found project=%s requested_project=%s platform=%s from_uid=%s",
+                    effective_project_id,
                     project_id,
                     source_platform_id,
                     from_uid,
@@ -489,7 +516,7 @@ class TelegramBridgeService:
                 return
 
             outbox = TelegramBridgeOutbox(
-                project_id=project_id,
+                project_id=effective_project_id,
                 binding_id=binding.id,
                 dedupe_key=dedupe_key,
                 payload_text=_build_outbound_payload(
@@ -609,12 +636,34 @@ class TelegramBridgeService:
         platform_api_key: str | None,
     ) -> _BridgeProjectEntry | None:
         project_cfg = await self._get_project_bridge_config(project_id, platform_api_key=platform_api_key)
-        if project_cfg is None or not project_cfg.bridge_enabled or not platform_api_key:
+        if project_cfg is None:
+            logger.warning(
+                "[TELEGRAM_BRIDGE] bridge project unavailable: config missing project=%s",
+                project_id,
+            )
+            return None
+        if not project_cfg.bridge_enabled:
+            logger.info(
+                "[TELEGRAM_BRIDGE] bridge disabled for project=%s",
+                project_id,
+            )
+            return None
+        if not platform_api_key:
+            logger.warning(
+                "[TELEGRAM_BRIDGE] bridge project unavailable: missing source platform api_key project=%s",
+                project_id,
+            )
             return None
 
         bot_token = str(project_cfg.bridge_bot_token or "").strip()
         bridge_chat_id = str(project_cfg.bridge_chat_id or "").strip()
         if not bot_token or not bridge_chat_id:
+            logger.warning(
+                "[TELEGRAM_BRIDGE] bridge project unavailable: incomplete config project=%s has_bot_token=%s has_chat_id=%s",
+                project_id,
+                bool(bot_token),
+                bool(bridge_chat_id),
+            )
             return None
 
         return _BridgeProjectEntry(
@@ -639,9 +688,37 @@ class TelegramBridgeService:
             return cached.config
 
         config = await self._fetch_project_bridge_config(project_id, platform_api_key=platform_api_key)
+        if config is not None:
+            cache_entry = _ProjectBridgeCacheEntry(
+                expires_at=now + self._PROJECT_CONFIG_CACHE_TTL_SECONDS,
+                stale_expires_at=now + self._PROJECT_CONFIG_STALE_TTL_SECONDS,
+                config=config,
+            )
+            self._project_config_cache[project_id] = cache_entry
+            if config.project_id != project_id:
+                self._project_config_cache[config.project_id] = cache_entry
+            return config
+
+        if cached is not None and cached.config is not None and cached.stale_expires_at > now:
+            logger.warning(
+                "[TELEGRAM_BRIDGE] project config refresh failed, using stale cached config project=%s",
+                project_id,
+            )
+            self._project_config_cache[project_id] = _ProjectBridgeCacheEntry(
+                expires_at=now + self._PROJECT_CONFIG_MISS_TTL_SECONDS,
+                stale_expires_at=cached.stale_expires_at,
+                config=cached.config,
+            )
+            return cached.config
+
         self._project_config_cache[project_id] = _ProjectBridgeCacheEntry(
-            expires_at=now + (self._PROJECT_CONFIG_CACHE_TTL_SECONDS if config is not None else self._PROJECT_CONFIG_MISS_TTL_SECONDS),
-            config=config,
+            expires_at=now + self._PROJECT_CONFIG_MISS_TTL_SECONDS,
+            stale_expires_at=now + self._PROJECT_CONFIG_MISS_TTL_SECONDS,
+            config=None,
+        )
+        logger.warning(
+            "[TELEGRAM_BRIDGE] project config unavailable, bridge skipped project=%s",
+            project_id,
         )
         return config
 
@@ -652,16 +729,67 @@ class TelegramBridgeService:
         platform_api_key: str | None,
     ) -> ProjectBridgeConfig | None:
         if not platform_api_key:
+            logger.warning(
+                "[TELEGRAM_BRIDGE] missing platform_api_key for project=%s",
+                project_id,
+            )
             return None
 
         url = f"{settings.api_base_url.rstrip('/')}/v1/projects/{project_id}/bridge-config/internal"
         try:
             async with httpx.AsyncClient(timeout=self._PROJECT_CONFIG_TIMEOUT_SECONDS) as client:
                 resp = await client.get(url, headers={"X-Platform-API-Key": platform_api_key})
+            if resp.status_code < 400:
+                return ProjectBridgeConfig(**resp.json())
+            if resp.status_code in {403, 404}:
+                fallback = await self._fetch_project_bridge_config_by_platform_key(platform_api_key)
+                if fallback is not None:
+                    if fallback.project_id != project_id:
+                        logger.warning(
+                            "[TELEGRAM_BRIDGE] platform project drift detected requested_project=%s actual_project=%s",
+                            project_id,
+                            fallback.project_id,
+                        )
+                    return fallback
+                logger.warning(
+                    "[TELEGRAM_BRIDGE] bridge config request failed project=%s status=%s body=%s",
+                    project_id,
+                    resp.status_code,
+                    (resp.text or "")[:500],
+                )
+                return None
+            logger.warning(
+                "[TELEGRAM_BRIDGE] bridge config request failed project=%s status=%s body=%s",
+                project_id,
+                resp.status_code,
+                (resp.text or "")[:500],
+            )
+            return None
+        except Exception:
+            logger.exception(
+                "[TELEGRAM_BRIDGE] bridge config request exception project=%s",
+                project_id,
+            )
+            return None
+
+    async def _fetch_project_bridge_config_by_platform_key(
+        self,
+        platform_api_key: str,
+    ) -> ProjectBridgeConfig | None:
+        url = f"{settings.api_base_url.rstrip('/')}/v1/projects/bridge-config/internal/by-platform"
+        try:
+            async with httpx.AsyncClient(timeout=self._PROJECT_CONFIG_TIMEOUT_SECONDS) as client:
+                resp = await client.get(url, headers={"X-Platform-API-Key": platform_api_key})
             if resp.status_code >= 400:
+                logger.warning(
+                    "[TELEGRAM_BRIDGE] bridge config fallback request failed status=%s body=%s",
+                    resp.status_code,
+                    (resp.text or "")[:500],
+                )
                 return None
             return ProjectBridgeConfig(**resp.json())
         except Exception:
+            logger.exception("[TELEGRAM_BRIDGE] bridge config fallback request exception")
             return None
 
     async def _get_or_create_binding(
@@ -704,6 +832,13 @@ class TelegramBridgeService:
         session.add(binding)
         try:
             await session.flush()
+            logger.info(
+                "[TELEGRAM_BRIDGE] binding created project=%s platform=%s binding=%s from_uid=%s",
+                bridge_project.project_id,
+                source_platform_id,
+                binding.id,
+                from_uid,
+            )
             return binding
         except IntegrityError:
             await session.rollback()
@@ -801,6 +936,10 @@ class TelegramBridgeWorker:
             await self._process_pending_for_project(project)
             await self._poll_topic_replies(project)
         except Exception:
+            logger.exception(
+                "[TELEGRAM_BRIDGE] project cycle failed project=%s",
+                project.project_id,
+            )
             return
 
     async def _ensure_polling_mode(self, project: _BridgeProjectEntry) -> None:
@@ -895,6 +1034,13 @@ class TelegramBridgeWorker:
                     record.error_message = str(exc)[:2000]
                     record.processed_at = datetime.now(timezone.utc)
                     await session.commit()
+                    logger.exception(
+                        "[TELEGRAM_BRIDGE] outbox delivery failed project=%s binding=%s dedupe_key=%s retry=%s",
+                        project.project_id,
+                        record.binding_id,
+                        record.dedupe_key,
+                        record.retry_count,
+                    )
 
     async def _claim_record(self, session: AsyncSession, record: TelegramBridgeOutbox) -> bool:
         try:

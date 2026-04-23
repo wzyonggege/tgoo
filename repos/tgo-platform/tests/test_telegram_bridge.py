@@ -1,6 +1,10 @@
+import time
 import unittest
+import uuid
 
 from app.domain.services.telegram_bridge import (
+    ProjectBridgeConfig,
+    TelegramBridgeService,
     _build_inbound_payload,
     _build_outbound_payload,
     _deserialize_payload,
@@ -134,6 +138,131 @@ class TelegramBridgeHelperTests(unittest.TestCase):
         self.assertEqual(payload.kind, "image")
         self.assertEqual(payload.media_url, "https://example.com/b.png")
         self.assertEqual(payload.caption, "💁 [客服]")
+
+
+class TelegramBridgeConfigCacheTests(unittest.IsolatedAsyncioTestCase):
+    async def test_uses_stale_cached_config_when_refresh_temporarily_fails(self) -> None:
+        service = TelegramBridgeService(None)  # type: ignore[arg-type]
+        project_id = uuid.uuid4()
+        config = ProjectBridgeConfig(
+            project_id=project_id,
+            bridge_enabled=True,
+            bridge_bot_token="token",
+            bridge_chat_id="-1001",
+            bridge_admin_only=True,
+        )
+        calls = 0
+
+        async def fake_fetch(
+            requested_project_id: uuid.UUID,
+            *,
+            platform_api_key: str | None,
+        ) -> ProjectBridgeConfig | None:
+            nonlocal calls
+            self.assertEqual(requested_project_id, project_id)
+            self.assertEqual(platform_api_key, "platform-key")
+            calls += 1
+            if calls == 1:
+                return config
+            return None
+
+        service._fetch_project_bridge_config = fake_fetch  # type: ignore[method-assign]
+
+        first = await service._get_project_bridge_config(project_id, platform_api_key="platform-key")
+        self.assertEqual(first, config)
+
+        cached = service._project_config_cache[project_id]
+        cached.expires_at = time.monotonic() - 1
+
+        second = await service._get_project_bridge_config(project_id, platform_api_key="platform-key")
+        self.assertEqual(second, config)
+        self.assertEqual(calls, 2)
+
+    async def test_returns_none_when_stale_cache_window_has_passed(self) -> None:
+        service = TelegramBridgeService(None)  # type: ignore[arg-type]
+        project_id = uuid.uuid4()
+        config = ProjectBridgeConfig(
+            project_id=project_id,
+            bridge_enabled=True,
+            bridge_bot_token="token",
+            bridge_chat_id="-1001",
+            bridge_admin_only=True,
+        )
+
+        async def fake_fetch(
+            requested_project_id: uuid.UUID,
+            *,
+            platform_api_key: str | None,
+        ) -> ProjectBridgeConfig | None:
+            self.assertEqual(requested_project_id, project_id)
+            self.assertEqual(platform_api_key, "platform-key")
+            return config
+
+        service._fetch_project_bridge_config = fake_fetch  # type: ignore[method-assign]
+        first = await service._get_project_bridge_config(project_id, platform_api_key="platform-key")
+        self.assertEqual(first, config)
+
+        service._project_config_cache[project_id].expires_at = time.monotonic() - 1
+        service._project_config_cache[project_id].stale_expires_at = time.monotonic() - 1
+
+        async def always_fail(
+            requested_project_id: uuid.UUID,
+            *,
+            platform_api_key: str | None,
+        ) -> ProjectBridgeConfig | None:
+            self.assertEqual(requested_project_id, project_id)
+            self.assertEqual(platform_api_key, "platform-key")
+            return None
+
+        service._fetch_project_bridge_config = always_fail  # type: ignore[method-assign]
+        second = await service._get_project_bridge_config(project_id, platform_api_key="platform-key")
+        self.assertIsNone(second)
+
+    async def test_load_bridge_project_returns_none_when_bridge_disabled(self) -> None:
+        service = TelegramBridgeService(None)  # type: ignore[arg-type]
+        project_id = uuid.uuid4()
+
+        async def fake_get_config(
+            requested_project_id: uuid.UUID,
+            *,
+            platform_api_key: str | None,
+        ) -> ProjectBridgeConfig | None:
+            self.assertEqual(requested_project_id, project_id)
+            self.assertEqual(platform_api_key, "platform-key")
+            return ProjectBridgeConfig(
+                project_id=project_id,
+                bridge_enabled=False,
+                bridge_bot_token="token",
+                bridge_chat_id="-1001",
+                bridge_admin_only=True,
+            )
+
+        service._get_project_bridge_config = fake_get_config  # type: ignore[method-assign]
+        project = await service._load_bridge_project(project_id=project_id, platform_api_key="platform-key")
+        self.assertIsNone(project)
+
+    async def test_load_bridge_project_returns_none_when_bridge_config_incomplete(self) -> None:
+        service = TelegramBridgeService(None)  # type: ignore[arg-type]
+        project_id = uuid.uuid4()
+
+        async def fake_get_config(
+            requested_project_id: uuid.UUID,
+            *,
+            platform_api_key: str | None,
+        ) -> ProjectBridgeConfig | None:
+            self.assertEqual(requested_project_id, project_id)
+            self.assertEqual(platform_api_key, "platform-key")
+            return ProjectBridgeConfig(
+                project_id=project_id,
+                bridge_enabled=True,
+                bridge_bot_token=None,
+                bridge_chat_id="-1001",
+                bridge_admin_only=True,
+            )
+
+        service._get_project_bridge_config = fake_get_config  # type: ignore[method-assign]
+        project = await service._load_bridge_project(project_id=project_id, platform_api_key="platform-key")
+        self.assertIsNone(project)
 
 
 if __name__ == "__main__":
