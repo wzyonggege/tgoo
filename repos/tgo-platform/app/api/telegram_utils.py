@@ -24,6 +24,30 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
+def _telegram_error_message(
+    method: str,
+    response: httpx.Response,
+    *,
+    chat_id: str | None = None,
+    message_thread_id: int | None = None,
+) -> str:
+    detail = response.text
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = str(payload.get("description") or payload.get("detail") or detail)
+    except Exception:
+        pass
+
+    context: list[str] = [method]
+    if chat_id:
+        context.append(f"chat_id={chat_id}")
+    if message_thread_id is not None:
+        context.append(f"thread_id={message_thread_id}")
+    context_text = " ".join(context)
+    return f"Telegram API error ({context_text}): HTTP {response.status_code} {detail}".strip()
+
+
 async def telegram_send_text(
     bot_token: str,
     chat_id: str,
@@ -62,14 +86,25 @@ async def telegram_send_text(
 
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         response = await client.post(url, json=payload)
-        response.raise_for_status()
+        if response.status_code >= 400:
+            message = _telegram_error_message(
+                "sendMessage",
+                response,
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+            )
+            logger.error("[TELEGRAM] %s", message)
+            raise RuntimeError(message)
         result = response.json()
         
         if not result.get("ok"):
-            logger.error(
-                "[TELEGRAM] sendMessage failed: %s",
-                result.get("description", "Unknown error")
+            message = (
+                f"Telegram API error (sendMessage chat_id={chat_id}"
+                + (f" thread_id={message_thread_id}" if message_thread_id is not None else "")
+                + f"): {result.get('description', 'Unknown error')}"
             )
+            logger.error("[TELEGRAM] %s", message)
+            raise RuntimeError(message)
         
         return result
 
@@ -119,15 +154,25 @@ async def telegram_send_photo(
             # Send as URL (string)
             data["photo"] = photo
             response = await client.post(url, data=data)
-            
-        response.raise_for_status()
+        if response.status_code >= 400:
+            message = _telegram_error_message(
+                "sendPhoto",
+                response,
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+            )
+            logger.error("[TELEGRAM] %s", message)
+            raise RuntimeError(message)
         result = response.json()
         
         if not result.get("ok"):
-            logger.error(
-                "[TELEGRAM] sendPhoto failed: %s",
-                result.get("description", "Unknown error")
+            message = (
+                f"Telegram API error (sendPhoto chat_id={chat_id}"
+                + (f" thread_id={message_thread_id}" if message_thread_id is not None else "")
+                + f"): {result.get('description', 'Unknown error')}"
             )
+            logger.error("[TELEGRAM] %s", message)
+            raise RuntimeError(message)
         
         return result
 
@@ -262,11 +307,16 @@ async def telegram_create_forum_topic(
 
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         response = await client.post(url, json={"chat_id": chat_id, "name": name[:128]})
-        response.raise_for_status()
+        if response.status_code >= 400:
+            message = _telegram_error_message("createForumTopic", response, chat_id=chat_id)
+            logger.error("[TELEGRAM] %s", message)
+            raise RuntimeError(message)
         result = response.json()
 
     if not result.get("ok"):
-        raise RuntimeError(result.get("description", "Telegram createForumTopic failed"))
+        message = f"Telegram API error (createForumTopic chat_id={chat_id}): {result.get('description', 'Telegram createForumTopic failed')}"
+        logger.error("[TELEGRAM] %s", message)
+        raise RuntimeError(message)
 
     topic = result.get("result") or {}
     message_thread_id = topic.get("message_thread_id")
