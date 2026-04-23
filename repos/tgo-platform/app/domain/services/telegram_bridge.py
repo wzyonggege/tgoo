@@ -313,6 +313,11 @@ def _build_outbound_payload(
     )
 
 
+def _is_missing_topic_error(exc: Exception) -> bool:
+    message = str(exc or "").strip().lower()
+    return "message thread not found" in message
+
+
 def _extract_update_message(update: dict[str, Any]) -> dict[str, Any] | None:
     message = update.get("message")
     if not isinstance(message, dict):
@@ -1062,34 +1067,50 @@ class TelegramBridgeWorker:
         if binding is None:
             raise RuntimeError("bridge binding not found")
 
-        if binding.topic_id is None:
-            topic_name = _topic_title(binding)
-            topic_id = await telegram_create_forum_topic(
-                bot_token=project.cfg.bot_token,
-                chat_id=str(project.cfg.bridge_chat_id or ""),
-                name=topic_name,
-            )
-            binding.topic_id = topic_id
-            binding.topic_name = topic_name
-            await session.commit()
-
         payload = _deserialize_payload(record.payload_text)
-        if payload.kind == "image" and payload.media_url:
-            await telegram_send_photo(
-                bot_token=project.cfg.bot_token,
-                chat_id=str(project.cfg.bridge_chat_id or ""),
-                photo=payload.media_url,
-                caption=(payload.caption or "")[:1024] or None,
-                message_thread_id=int(binding.topic_id),
-            )
-        else:
-            text = payload.text or record.payload_text
-            await telegram_send_text(
-                bot_token=project.cfg.bot_token,
-                chat_id=str(project.cfg.bridge_chat_id or ""),
-                text=text,
-                message_thread_id=int(binding.topic_id),
-            )
+        for attempt in range(2):
+            if binding.topic_id is None:
+                topic_name = _topic_title(binding)
+                topic_id = await telegram_create_forum_topic(
+                    bot_token=project.cfg.bot_token,
+                    chat_id=str(project.cfg.bridge_chat_id or ""),
+                    name=topic_name,
+                )
+                binding.topic_id = topic_id
+                binding.topic_name = topic_name
+                await session.commit()
+
+            try:
+                if payload.kind == "image" and payload.media_url:
+                    await telegram_send_photo(
+                        bot_token=project.cfg.bot_token,
+                        chat_id=str(project.cfg.bridge_chat_id or ""),
+                        photo=payload.media_url,
+                        caption=(payload.caption or "")[:1024] or None,
+                        message_thread_id=int(binding.topic_id),
+                    )
+                else:
+                    text = payload.text or record.payload_text
+                    await telegram_send_text(
+                        bot_token=project.cfg.bot_token,
+                        chat_id=str(project.cfg.bridge_chat_id or ""),
+                        text=text,
+                        message_thread_id=int(binding.topic_id),
+                    )
+                break
+            except Exception as exc:
+                if attempt == 0 and binding.topic_id is not None and _is_missing_topic_error(exc):
+                    logger.warning(
+                        "[TELEGRAM_BRIDGE] topic missing, recreating topic project=%s binding=%s old_topic_id=%s",
+                        project.project_id,
+                        binding.id,
+                        binding.topic_id,
+                    )
+                    binding.topic_id = None
+                    binding.topic_name = None
+                    await session.commit()
+                    continue
+                raise
 
         record.status = "completed"
         record.error_message = None

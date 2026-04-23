@@ -9,6 +9,7 @@ from app.domain.services.telegram_bridge import (
     _build_outbound_payload,
     _deserialize_payload,
     _format_bridge_text,
+    _is_missing_topic_error,
     _sanitize_extra,
     _source_key,
 )
@@ -138,6 +139,18 @@ class TelegramBridgeHelperTests(unittest.TestCase):
         self.assertEqual(payload.kind, "image")
         self.assertEqual(payload.media_url, "https://example.com/b.png")
         self.assertEqual(payload.caption, "💁 [客服]")
+
+    def test_is_missing_topic_error_detects_deleted_topic_message(self) -> None:
+        exc = RuntimeError(
+            "Telegram API error (sendMessage chat_id=-1001 thread_id=22): HTTP 400 Bad Request: message thread not found"
+        )
+        self.assertTrue(_is_missing_topic_error(exc))
+
+    def test_is_missing_topic_error_ignores_other_telegram_errors(self) -> None:
+        exc = RuntimeError(
+            "Telegram API error (sendMessage chat_id=-1001 thread_id=22): HTTP 400 Bad Request: chat is not a forum"
+        )
+        self.assertFalse(_is_missing_topic_error(exc))
 
 
 class TelegramBridgeConfigCacheTests(unittest.IsolatedAsyncioTestCase):
